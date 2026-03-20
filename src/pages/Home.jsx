@@ -6,6 +6,7 @@ import GalaxyExp from "../components/threejs/GalaxyExp";
 import Waves from "../components/threejs/Waves";
 import Grain from "../components/threejs/Grain";
 import MovingGradient from "../components/threejs/MovingGradient";
+import { Leva } from "leva";
 
 export default function Home()
 {
@@ -38,6 +39,7 @@ export default function Home()
             </Page>
         </div> */}
         <div className="absolute top-0 left-0 w-screen h-screen z-0">
+            <Leva/>
             <Canvas frameloop="always">
                 {/* <Portal 
                     mousePosition={mousePosition}

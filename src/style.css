@@ -45,11 +45,11 @@ body,
     background: black;
 }
 
-/* hide leva */
+/* hide leva
 #leva__root > * {
     display: none !important;
     pointer-events: none;
-}
+} */
 
 /* dropshadows for text and icons */
 h1, h2, h3, h4, p, a, span {
