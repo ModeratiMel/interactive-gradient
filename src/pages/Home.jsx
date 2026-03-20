@@ -6,26 +6,37 @@ import { Leva } from "leva";
 export default function Home()
 {
 
-    //mouse position
-    const [mousePosition,setMousePosition] = useState({ x: 1, y: 1 });
-    const updateMousePosition = ev => {
-        let fromCenterX = ev.clientX/window.innerWidth
-        let fromCenterY = ev.clientY/window.innerHeight
-        setMousePosition({ x: fromCenterX, y: fromCenterY });
-    };
-    useEffect(()=> {
-        window.addEventListener('mousemove', updateMousePosition);
-    })
+  // Mouse position in [0,1] — (0,0) = top-left
+  const [mousePosition, setMousePosition] = useState({ x: 0.5, y: 0.5 })
 
-    //window size
-    const [windowSize, setWindowSize] = useState({x:window.innerWidth, y:window.innerHeight})
-    const updateSize = () => {
-        setWindowSize({x:window.innerWidth, y:window.innerHeight})
+  // Window size in CSS pixels
+  const [windowSize, setWindowSize] = useState({
+    x: window.innerWidth,
+    y: window.innerHeight,
+  })
+
+  useEffect(() => {
+    const onMouseMove = (e) => {
+      setMousePosition({
+        x: e.clientX / window.innerWidth,
+        y: e.clientY / window.innerHeight,
+      })
     }
-    window.addEventListener('resize', updateSize)
+    const onResize = () => {
+      setWindowSize({ x: window.innerWidth, y: window.innerHeight })
+    }
 
-    return <>
-        {/* <div className="absolute top-0 left-0 w-screen h-screen z-10">
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('resize', onResize)
+
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [])
+
+    return (<>
+      {/* <div className="absolute top-0 left-0 w-screen h-screen z-10">
             <Page>
                 <Section className="flex-col mb-5 mt-20 md:mt-10 ">
                     <h1 className="text-6xl sm:text-8xl">Hello World</h1>
@@ -33,15 +44,14 @@ export default function Home()
                 </Section>
             </Page>
         </div> */}
-        <div className="absolute top-0 left-0 w-screen h-screen z-0">
-            <Leva/>
-            <Canvas frameloop="always">
-                <MovingGradient
-                    mousePosition={mousePosition}
-                    windowSize={windowSize}
-                />
-            </Canvas>
-        </div>
-        {/* <div className="w-full h-full bg-red-100"></div> */}
-    </>
+    <div className="absolute top-0 left-0 w-screen h-screen z-0">
+      <Leva />
+      <Canvas frameloop="always">
+        <MovingGradient
+          mousePosition={mousePosition}
+          windowSize={windowSize}
+        />
+      </Canvas>
+    </div>
+  </>)
 }
