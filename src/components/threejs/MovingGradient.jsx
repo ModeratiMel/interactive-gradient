@@ -1,60 +1,49 @@
 import { useRef } from 'react'
 import { useFrame, useThree } from '@react-three/fiber'
 import { useControls } from 'leva'
-import * as THREE from 'three'
 
 export default function SmoothGradient() {
   const material = useRef()
   const { size, mouse } = useThree()
 
-  const {
-    speed,
-    scale,
-    grain,
-    mouseInfluence,
-    mouseRadius,
-    orangeStart,
-    orangeEnd,
-    whiteStart,
-    whiteEnd,
-  } = useControls('Gradient', {
-    speed: { value: 0.15, min: 0.01, max: 1, step: 0.01 },
-    scale: { value: 1.5, min: 0.5, max: 5, step: 0.1 },
-    grain: { value: 0.015, min: 0.0, max: 0.1, step: 0.001 },
+  const smoothMouse = useRef([0.5, 0.5])
+  const prevMouse   = useRef([0.5, 0.5])
 
-    // 🖱️ mouse controls
-    mouseInfluence: { value: 0.4, min: 0, max: 1, step: 0.01 },
-    mouseRadius: { value: 0.3, min: 0.05, max: 1, step: 0.01 },
-
-    orangeStart: { value: 0.35, min: 0, max: 1 },
-    orangeEnd: { value: 0.65, min: 0, max: 1 },
-    whiteStart: { value: 0.8, min: 0, max: 1 },
-    whiteEnd: { value: 0.98, min: 0, max: 1 },
-  })
+  const { speed, grain, spread, deformStrength, deformRadius, mouseLerp } =
+    useControls('Gradient', {
+      speed:          { value: 0.08,  min: 0.01, max: 0.4,  step: 0.005 },
+      grain:          { value: 0.030, min: 0.0,  max: 0.10, step: 0.001 },
+      spread:         { value: 1.0,   min: 0.5,  max: 2.0,  step: 0.05  },
+      deformStrength: { value: 0.30,  min: 0.0,  max: 0.8,  step: 0.01  },
+      deformRadius:   { value: 0.45,  min: 0.05, max: 0.9,  step: 0.01  },
+      mouseLerp:      { value: 0.055, min: 0.005,max: 0.2,  step: 0.005,
+                        label: 'mouse smoothing' },
+    })
 
   useFrame(({ clock }) => {
-    if (material.current) {
-      material.current.uniforms.uTime.value = clock.elapsedTime
-      material.current.uniforms.uResolution.value = [size.width, size.height]
+    if (!material.current) return
+    const u = material.current.uniforms
+    const t = clock.elapsedTime
 
-      // convert mouse (-1 to 1) → (0 to 1)
-      material.current.uniforms.uMouse.value = [
-        (mouse.x + 1) / 2,
-        (mouse.y + 1) / 2,
-      ]
+    const mx = (mouse.x + 1) / 2
+    const my = (mouse.y + 1) / 2
 
-      material.current.uniforms.uSpeed.value = speed
-      material.current.uniforms.uScale.value = scale
-      material.current.uniforms.uGrain.value = grain
+    const velX = mx - prevMouse.current[0]
+    const velY = my - prevMouse.current[1]
+    prevMouse.current = [mx, my]
 
-      material.current.uniforms.uMouseInfluence.value = mouseInfluence
-      material.current.uniforms.uMouseRadius.value = mouseRadius
+    smoothMouse.current[0] += (mx - smoothMouse.current[0]) * mouseLerp
+    smoothMouse.current[1] += (my - smoothMouse.current[1]) * mouseLerp
 
-      material.current.uniforms.uOrangeStart.value = orangeStart
-      material.current.uniforms.uOrangeEnd.value = orangeEnd
-      material.current.uniforms.uWhiteStart.value = whiteStart
-      material.current.uniforms.uWhiteEnd.value = whiteEnd
-    }
+    u.uTime.value           = t
+    u.uResolution.value     = [size.width, size.height]
+    u.uMouse.value          = [...smoothMouse.current]
+    u.uMouseVel.value       = [velX, velY]
+    u.uSpeed.value          = speed
+    u.uGrain.value          = grain
+    u.uSpread.value         = spread
+    u.uDeformStrength.value = deformStrength
+    u.uDeformRadius.value   = deformRadius
   })
 
   return (
@@ -63,21 +52,15 @@ export default function SmoothGradient() {
       <shaderMaterial
         ref={material}
         uniforms={{
-          uTime: { value: 0 },
-          uResolution: { value: [size.width, size.height] },
-          uMouse: { value: [0.5, 0.5] },
-
-          uSpeed: { value: speed },
-          uScale: { value: scale },
-          uGrain: { value: grain },
-
-          uMouseInfluence: { value: mouseInfluence },
-          uMouseRadius: { value: mouseRadius },
-
-          uOrangeStart: { value: orangeStart },
-          uOrangeEnd: { value: orangeEnd },
-          uWhiteStart: { value: whiteStart },
-          uWhiteEnd: { value: whiteEnd },
+          uTime:           { value: 0 },
+          uResolution:     { value: [size.width, size.height] },
+          uMouse:          { value: [0.5, 0.5] },
+          uMouseVel:       { value: [0.0, 0.0] },
+          uSpeed:          { value: speed },
+          uGrain:          { value: grain },
+          uSpread:         { value: spread },
+          uDeformStrength: { value: deformStrength },
+          uDeformRadius:   { value: deformRadius },
         }}
         vertexShader={vertexShader}
         fragmentShader={fragmentShader}
@@ -93,57 +76,155 @@ const vertexShader = `
   }
 `
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Core idea:
+//   Instead of a radial blob, we build a smooth scalar "heat" field by
+//   blending two off-screen light sources — one upper-left (peach/tan warmth)
+//   and one left-edge (saturated red fringe) — then map that heat value
+//   through a color ramp that goes:
+//
+//   1.0  →  muted peachy tan      (the brightest region, upper-left)
+//   0.7  →  vivid red-orange      (left-edge fringe)
+//   0.45 →  dark muddy crimson    (the wide middle region)
+//   0.15 →  near-black dark red   (lower-right shadow)
+//   0.0  →  pure black
+//
+//   No smoothstep hard stops — we use pure mix() with gentle power curves
+//   so every transition is film-smooth.
+// ─────────────────────────────────────────────────────────────────────────────
+
 const fragmentShader = `
+precision highp float;
+
 uniform float uTime;
-uniform vec2 uResolution;
-uniform vec2 uMouse;
-
+uniform vec2  uResolution;
+uniform vec2  uMouse;
+uniform vec2  uMouseVel;
 uniform float uSpeed;
-uniform float uScale;
 uniform float uGrain;
+uniform float uSpread;
+uniform float uDeformStrength;
+uniform float uDeformRadius;
 
-uniform float uMouseInfluence;
-uniform float uMouseRadius;
+float hash(vec2 p) {
+  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+}
 
-uniform float uOrangeStart;
-uniform float uOrangeEnd;
-uniform float uWhiteStart;
-uniform float uWhiteEnd;
+float noise(vec2 p) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  f = f * f * (3.0 - 2.0 * f);
+  return mix(
+    mix(hash(i + vec2(0,0)), hash(i + vec2(1,0)), f.x),
+    mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x),
+    f.y
+  );
+}
 
-float random(vec2 uv) {
-  return fract(sin(dot(uv, vec2(12.9898,78.233))) * 43758.5453);
+// 4-octave fbm — used only for gentle warp, kept subtle
+float fbm(vec2 p) {
+  float v = 0.0, a = 0.5;
+  for (int i = 0; i < 4; i++) {
+    v += noise(p) * a;
+    p  = p * 2.07 + vec2(1.3, 0.9);
+    a *= 0.50;
+  }
+  return v;
+}
+
+// Smooth falloff from a point — no hard edge, pure gaussian-ish
+float lightFalloff(vec2 uv, vec2 source, float radius) {
+  float d = length(uv - source);
+  // use an exponential curve for extra smoothness at the tail
+  return exp(-d * d / (radius * radius * 0.5));
 }
 
 void main() {
   vec2 uv = gl_FragCoord.xy / uResolution;
+  float aspect = uResolution.x / uResolution.y;
   float t = uTime * uSpeed;
 
-  // base flowing field (your blobs)
-  float field =
-    sin(uv.x * uScale + t * 1.2) +
-    sin(uv.y * uScale - t * 0.9) +
-    sin((uv.x + uv.y) * (uScale * 0.8) + t * 0.7);
+  // ── Mouse deformation ───────────────────────────────────────────────
+  // Pull UVs toward the mouse within deformRadius.
+  // Velocity adds an extra stretch when moving fast.
+  vec2  toMouse  = uMouse - uv;
+  vec2  toMouseA = vec2(toMouse.x * aspect, toMouse.y);
+  float mDist    = length(toMouseA);
+  float mInfl    = smoothstep(uDeformRadius, 0.0, mDist);
+  float velBoost = 1.0 + length(uMouseVel) * 22.0;
+  vec2  wuv      = uv + toMouse * mInfl * uDeformStrength * velBoost;
 
-  field /= 3.0;
+  // ── Gentle organic warp (very slow, very subtle) ────────────────────
+  float warpScale = 1.4 / uSpread;
+  vec2  warpCoord = wuv * warpScale + vec2(t * 0.07, t * 0.05);
+  float warpX = (fbm(warpCoord)              - 0.5) * 0.10;
+  float warpY = (fbm(warpCoord + vec2(5.2, 1.3)) - 0.5) * 0.10;
+  vec2  swuv  = wuv + vec2(warpX, warpY);
 
-  float gradient = field * 0.5 + 0.5;
+  // ── Two light sources, both off-screen / at the edge ───────────────
+  //
+  // Source A: upper-left corner — the warm peach/tan glow
+  //   Drifts very slowly so the hotspot breathes without relocating.
+  vec2 srcA = vec2(
+    -0.05 + sin(t * 0.13) * 0.05,
+     1.08 + cos(t * 0.09) * 0.04
+  );
 
-  // 🖱️ mouse blob (soft radial influence)
-  float dist = distance(uv, uMouse);
-  float mouseBlob = smoothstep(uMouseRadius, 0.0, dist);
+  // Source B: left edge, mid-height — the vivid red-orange fringe
+  vec2 srcB = vec2(
+    -0.10 + sin(t * 0.17) * 0.04,
+     0.52 + cos(t * 0.11) * 0.09
+  );
 
-  // blend mouse into field (not replace!)
-  gradient = mix(gradient, 1.0, mouseBlob * uMouseInfluence);
+  // Aspect-correct the source distances
+  vec2 dA = vec2((swuv.x - srcA.x) * aspect, swuv.y - srcA.y);
+  vec2 dB = vec2((swuv.x - srcB.x) * aspect, swuv.y - srcB.y);
 
-  vec3 black = vec3(0.0);
-  vec3 orange = vec3(1.0, 0.4, 0.0);
-  vec3 white = vec3(1.0);
+  float heatA = exp(-dot(dA, dA) / (uSpread * uSpread * 0.72));
+  float heatB = exp(-dot(dB, dB) / (uSpread * uSpread * 0.28));
 
-  vec3 color = mix(black, orange, smoothstep(uOrangeStart, uOrangeEnd, gradient));
-  color = mix(color, white, smoothstep(uWhiteStart, uWhiteEnd, gradient));
+  // Combine: A gives the broad warm sweep, B gives the red left-edge kick
+  float heat = heatA * 0.65 + heatB * 0.50;
+  heat = clamp(heat, 0.0, 1.0);
 
-  float g = (random(uv + t * 2.0) - 0.5) * uGrain;
-  color += g;
+  // ── Color ramp ──────────────────────────────────────────────────────
+  // Sampled at key heat values matching the reference image:
+  //
+  //  heat ≈ 1.0   peachy tan highlight   (212, 155, 110)
+  //  heat ≈ 0.75  muted warm salmon      (185, 95,  55)
+  //  heat ≈ 0.50  vivid red-orange       (195, 45,  10)  ← left-fringe colour
+  //  heat ≈ 0.28  dark muddy crimson     (95,  18,  8)
+  //  heat ≈ 0.10  very dark red-brown    (30,  5,   3)
+  //  heat ≈ 0.0   black
+  //
+  // We build the ramp by repeated mix() calls — no smoothstep transitions,
+  // just linear blends so the whole thing stays film-smooth.
+
+  vec3 c0 = vec3(0.000, 0.000, 0.000);  // black
+  vec3 c1 = vec3(0.118, 0.020, 0.012);  // very dark red-brown
+  vec3 c2 = vec3(0.373, 0.071, 0.031);  // dark muddy crimson
+  vec3 c3 = vec3(0.765, 0.176, 0.039);  // vivid red-orange
+  vec3 c4 = vec3(0.725, 0.373, 0.216);  // muted warm salmon
+  vec3 c5 = vec3(0.831, 0.608, 0.431);  // peachy tan highlight
+
+  // Piecewise linear ramp — each segment covers a heat band
+  // Using clamp(x,0,1) for the t values keeps everything clean
+  vec3 color;
+  if (heat < 0.10) {
+    color = mix(c0, c1, heat / 0.10);
+  } else if (heat < 0.28) {
+    color = mix(c1, c2, (heat - 0.10) / 0.18);
+  } else if (heat < 0.50) {
+    color = mix(c2, c3, (heat - 0.28) / 0.22);
+  } else if (heat < 0.75) {
+    color = mix(c3, c4, (heat - 0.50) / 0.25);
+  } else {
+    color = mix(c4, c5, (heat - 0.75) / 0.25);
+  }
+
+  // ── Grain ──────────────────────────────────────────────────────────
+  float gr = (hash(uv + fract(t) * 71.3) - 0.5) * uGrain;
+  color = clamp(color + gr, 0.0, 1.0);
 
   gl_FragColor = vec4(color, 1.0);
 }
