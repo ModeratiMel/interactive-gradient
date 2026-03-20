@@ -1,0 +1,148 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer components {
+    .basic-button {
+      @apply max-w-lg py-1.5 px-10 bg-white text-black rounded font-light text-base sm:text-lg focus:ring-2 focus:ring-white hover:scale-[1.05] transition-all drop-shadow;
+      text-shadow: none;
+    }
+    .standard-h1 {
+        @apply text-6xl sm:text-8xl capitalize;
+    }
+    .small-h1 {
+        @apply text-4xl sm:text-6xl capitalize;
+    }
+    .standard-h2 {
+        @apply text-xl sm:text-3xl capitalize;
+    }
+    .standard-p {
+        @apply text-base sm:text-lg;
+    }
+    .caps {
+        @apply uppercase tracking-wide font-medium;
+    }
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: "sofia-pro", sans-serif;
+    font-weight: 100;
+    font-style: normal;
+}
+
+html,
+body,
+#root
+{
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: black;
+}
+
+/* hide leva */
+#leva__root > * {
+    display: none !important;
+    pointer-events: none;
+}
+
+/* dropshadows for text and icons */
+h1, h2, h3, h4, p, a, span {
+    text-shadow: 0px 1px 10px rgba(0, 0, 0, 0.5);
+    font-weight: 200;
+}
+b {
+    font-weight: bold;
+}
+.light {
+    text-shadow: 0px 1px 10px rgba(0, 0, 0, 0.75);
+}
+.mg {
+    filter: drop-shadow(0px 1px 2px rgba(0, 0, 0, 0.5));
+}
+.icon {
+    filter: drop-shadow(0px 1px 5px rgba(0, 0, 0, 0.3));
+}
+
+/* mg animation */
+.mg-animation path {
+    stroke-dasharray: 1000;
+    animation: dash 2.5s linear 1 reverse;
+}
+.mg path {
+    stroke-width: 1px;
+    stroke: white;
+    fill: none;
+}
+@keyframes dash {
+    to {
+        stroke-dashoffset: 1000;
+    }
+}
+
+/* shuffle rotate animation */
+.shuffle svg, .shuffle span {
+    transition: all ease 0.5s;
+}
+.shuffle:hover div:not(.rotate) svg{
+    transform: rotate(90deg)
+}
+.shuffle:hover span {
+    transform: scale(1.05);
+}
+.rotate{
+    animation: rotate 1.5s cubic-bezier(0,.91,.53,.97) 1 forwards;
+    pointer-events: none;
+}
+@keyframes rotate {
+    from{
+        transform: rotate(0deg)
+    }
+    to {
+        transform: rotate(1080deg)
+    }
+}
+/* fade in animation */
+@keyframes fadein {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+/* page-wrapper base styles */
+.page-wrapper {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: 1fr;
+    align-items: center;
+    justify-items: center;
+    overflow-y: scroll;
+}
+
+/* fade in animations */
+.wrapper {
+    animation: fadein 1s ease 1 forwards;
+}
+
+@keyframes fadein {
+    0% {
+        opacity: 0;
+    }
+    100% {
+        opacity: 1;
+    }
+}
+
+.canvas {
+    animation: fadein 1s ease 1.5s 1 forwards;
+}
