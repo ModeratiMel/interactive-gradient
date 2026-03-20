@@ -4,7 +4,7 @@ import { extend, useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import { useControls } from 'leva'
 
-// ─── Frequency/phase tables (irrational ratios → never-repeating paths) ───────
+// ─── Frequency/phase tables (irrational ratios → never-repeating paths) ───
 const WARM_FREQS = [
   [0.37, 0.19, 0.29, 0.11, 0.00, 1.10],
   [0.23, 0.41, 0.17, 0.31, 2.30, 0.70],
@@ -33,18 +33,21 @@ function lissajous(t, fx1, fx2, fy1, fy2, px, py, randomness, margin = 0.08) {
   return [x, y]
 }
 
-// ─── Fragment shader ──────────────────────────────────────────────────────────
+// ─── Shaders ───
 const fragmentShader = /* glsl */`
 precision highp float;
 
 uniform float uTime;
 uniform vec2  uResolution;
 uniform vec2  uMouse;
-uniform float uGrain;
 uniform float uSpread;
 uniform float uMouseBlend;
 uniform float uColdStrength;
 uniform float uPeakCap;
+
+uniform float uGrain;
+uniform float uGrainSize;
+uniform float uGrainSpeed;
 
 uniform vec3  uC0col;
 uniform vec3  uC1col;
@@ -141,7 +144,21 @@ void main() {
   float heat  = clamp(warm - cold, 0.0, 1.0);
   vec3  color = colorRamp(heat);
 
-  float gr = (hash(uv + fract(uTime * 0.1) * 71.3) - 0.5) * uGrain;
+  float grainTime  = uTime * uGrainSpeed;
+  float grainFloor = floor(grainTime);
+  float grainFract = fract(grainTime);
+
+  vec2 grainUV = floor(uv * uResolution / uGrainSize) / (uResolution / uGrainSize);
+
+  // hash the frame index itself first — converts linear stepping into
+  // a pseudo-random scatter so no two consecutive frames hit nearby hash space
+  vec2 offsetA = vec2(hash(vec2(grainFloor, 0.0)), hash(vec2(0.0, grainFloor))) * 100.0;
+  vec2 offsetB = vec2(hash(vec2(grainFloor + 1.0, 0.0)), hash(vec2(0.0, grainFloor + 1.0))) * 100.0;
+
+  float grA = (hash(grainUV + offsetA) - 0.5);
+  float grB = (hash(grainUV + offsetB) - 0.5);
+  float gr  = mix(grA, grB, grainFract) * uGrain;
+
   color = clamp(color + gr, 0.0, 1.0);
 
   gl_FragColor = vec4(color, 1.0);
@@ -154,69 +171,73 @@ const vertexShader = `
   }
 `
 
-// ─── shaderMaterial ───────────────────────────────────────────────────────────
-const GradientMaterial = shaderMaterial(
-  {
-    uTime:         0,
-    uResolution:   new THREE.Vector2(1, 1),
-    uMouse:        new THREE.Vector2(0.5, 0.5),
-    uGrain:        0.030,
-    uSpread:       0.95,
-    uMouseBlend:   0.70,
-    uColdStrength: 0.55,
-    uPeakCap:      0.82,
-    uC0col:        new THREE.Color('#000000'),
-    uC1col:        new THREE.Color('#1e0503'),
-    uC2col:        new THREE.Color('#5f1208'),
-    uC3col:        new THREE.Color('#c32d0a'),
-    uC4col:        new THREE.Color('#915535'),
-    uW0: new THREE.Vector2(-99, -99),
-    uW1: new THREE.Vector2(-99, -99),
-    uW2: new THREE.Vector2(-99, -99),
-    uW3: new THREE.Vector2(-99, -99),
-    uW4: new THREE.Vector2(-99, -99),
-    uC0: new THREE.Vector2(-99, -99),
-    uC1: new THREE.Vector2(-99, -99),
-    uC2: new THREE.Vector2(-99, -99),
-    uC3: new THREE.Vector2(-99, -99),
-  },
-  vertexShader,
-  fragmentShader
-)
-
-extend({ GradientMaterial })
-
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Component ───
 // Props:
 //   mousePosition — { x: [0,1], y: [0,1] } where (0,0) is top-left
 //   windowSize    — { x: innerWidth, y: innerHeight } in CSS pixels
 export default function MovingGradient({ mousePosition, windowSize }) {
-  const mat          = useRef()
+  const mat = useRef()
   const mouseBlobPos = useRef(new THREE.Vector2(0.5, 0.5))
 
   const { speed, randomness, numWarm, numCold } = useControls('Motion', {
-    speed:      { value: 0.10, min: 0.01, max: 0.5,     step: 0.005 },
-    randomness: { value: 0.55, min: 0.0,  max: 1.0,     step: 0.01  },
-    numWarm:    { value: 3,    min: 1,    max: MAX_WARM, step: 1, label: 'warm blobs' },
-    numCold:    { value: 2,    min: 0,    max: MAX_COLD, step: 1, label: 'cold blobs' },
+    speed: { value: 0.2, min: 0.01, max: 5.0, step: 0.01 },
+    randomness: { value: 0.1, min: 0.0, max: 1.0, step: 0.01 },
+    numWarm: { value: 3, min: 1, max: MAX_WARM, step: 1, label: 'warm blobs' },
+    numCold: { value: 2, min: 0, max: MAX_COLD, step: 1, label: 'cold blobs' },
   })
 
-  const { grain, spread, mouseBlend, mouseLag, coldStrength } = useControls('Blobs', {
-    grain:        { value: 0.030, min: 0.0,   max: 0.10, step: 0.001 },
-    spread:       { value: 0.95,  min: 0.4,   max: 2.0,  step: 0.05  },
-    mouseBlend:   { value: 0.70,  min: 0.0,   max: 1.0,  step: 0.01,  label: 'mouse blob strength' },
-    mouseLag:     { value: 0.045, min: 0.005, max: 0.2,  step: 0.005, label: 'mouse lag' },
-    coldStrength: { value: 0.55,  min: 0.0,   max: 1.0,  step: 0.01,  label: 'cold blob strength' },
+  const { grain, grainSize, grainSpeed, spread, mouseBlend, mouseLag, coldStrength } = useControls('Blobs', {
+    grain: { value: 0.04, min: 0.0, max: 0.10, step: 0.001 },
+    grainSize: { value: 3.0, min: 1.0, max: 10.0, step: 1.0 },
+    grainSpeed: { value: 2.0, min: 1.0, max: 15.0, step: 1.0, label: 'grain speed' },
+    spread: { value: 1.6, min: 0.5, max: 5.0, step: 0.05 },
+    mouseBlend: { value: 0.70, min: 0.0, max: 1.0, step: 0.01, label: 'mouse blob strength' },
+    mouseLag: { value: 0.045, min: 0.005, max: 0.2, step: 0.005, label: 'mouse lag' },
+    coldStrength: { value: 0.65, min: 0.0, max: 1.0, step: 0.01, label: 'cold blob strength' },
   })
 
   const { stop0, stop1, stop2, stop3, stop4, peakCap } = useControls('Colors', {
-    stop0:   { value: '#000000', label: 'black' },
-    stop1:   { value: '#1e0503', label: 'dark red-brown' },
-    stop2:   { value: '#5f1208', label: 'muddy crimson' },
-    stop3:   { value: '#c32d0a', label: 'red-orange' },
-    stop4:   { value: '#915535', label: 'peak (warm core)' },
+    stop0: { value: '#000000', label: 'black' },
+    stop1: { value: '#280200', label: 'dark red-brown' },
+    stop2: { value: '#730100', label: 'muddy crimson' },
+    stop3: { value: '#cd3310', label: 'red-orange' },
+    stop4: { value: '#e8a06a', label: 'peak (warm core)' },
     peakCap: { value: 0.82, min: 0.3, max: 1.0, step: 0.01, label: 'peak brightness cap' },
   })
+
+  // ─── shaderMaterial ─── 
+  const GradientMaterial = shaderMaterial(
+    {
+      uTime:         0,
+      uResolution:   new THREE.Vector2(1, 1),
+      uMouse:        new THREE.Vector2(0.5, 0.5),
+      uGrain:        grain,
+      uGrainSize: grainSize,
+      uGrainSpeed: grainSpeed,
+      uSpread:       spread,
+      uMouseBlend:   mouseBlend,
+      uColdStrength: coldStrength,
+      uPeakCap:      0.82,
+      uC0col:        new THREE.Color(stop0),
+      uC1col:        new THREE.Color(stop1),
+      uC2col:        new THREE.Color(stop2),
+      uC3col:        new THREE.Color(stop3),
+      uC4col:        new THREE.Color(stop4),
+      uW0: new THREE.Vector2(-99, -99),
+      uW1: new THREE.Vector2(-99, -99),
+      uW2: new THREE.Vector2(-99, -99),
+      uW3: new THREE.Vector2(-99, -99),
+      uW4: new THREE.Vector2(-99, -99),
+      uC0: new THREE.Vector2(-99, -99),
+      uC1: new THREE.Vector2(-99, -99),
+      uC2: new THREE.Vector2(-99, -99),
+      uC3: new THREE.Vector2(-99, -99),
+    },
+    vertexShader,
+    fragmentShader
+  )
+
+  extend({ GradientMaterial })
 
   useFrame(({ clock }) => {
     if (!mat.current) return
@@ -236,11 +257,14 @@ export default function MovingGradient({ mousePosition, windowSize }) {
     mouseBlobPos.current.lerp({ x: mx, y: my }, mouseLag)
     m.uMouse.copy(mouseBlobPos.current)
 
-    m.uGrain        = grain
-    m.uSpread       = spread
-    m.uMouseBlend   = mouseBlend
+    m.uGrain = grain
+    m.uGrainSize = grainSize
+    m.uGrainSpeed = grainSpeed
+
+    m.uSpread = spread
+    m.uMouseBlend = mouseBlend
     m.uColdStrength = coldStrength
-    m.uPeakCap      = peakCap
+    m.uPeakCap = peakCap
 
     m.uC0col.set(stop0)
     m.uC1col.set(stop1)

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Canvas } from '@react-three/fiber'
 import MovingGradient from "../components/threejs/MovingGradient";
 import { Leva } from "leva";
+import { Perf } from "r3f-perf";
 
 export default function Home()
 {
@@ -45,8 +46,9 @@ export default function Home()
             </Page>
         </div> */}
     <div className="absolute top-0 left-0 w-screen h-screen z-0">
-      <Leva />
-      <Canvas frameloop="always">
+            <Leva />
+            <Canvas frameloop="always">
+                <Perf position="top-left"/>
         <MovingGradient
           mousePosition={mousePosition}
           windowSize={windowSize}
