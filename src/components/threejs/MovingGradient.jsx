@@ -4,7 +4,6 @@ import { extend, useFrame } from '@react-three/fiber'
 import { useRef } from 'react'
 import { useControls } from 'leva'
 
-// ─── Shaders ───
 const fragmentShader = /* glsl */`
 precision highp float;
 
@@ -12,13 +11,13 @@ uniform float uTime;
 uniform vec2  uResolution;
 uniform vec2  uMouse;
 
+uniform float uBeamAngle;
+uniform float uConeAngle;
 uniform float uFalloff;
-uniform float uSpreadX;
-uniform float uSpreadY;
+uniform float uSourceDist;
 uniform float uWarpStrength;
 uniform float uAmbient;
 uniform float uPeakCap;
-uniform float uMouseLag;
 
 uniform float uGrain;
 uniform float uGrainSize;
@@ -68,33 +67,56 @@ void main() {
   float aspect = uResolution.x / uResolution.y;
   float t      = uTime * 0.04;
 
-  // Slow organic warp — roughens the light edge so it isn't a perfect ellipse
-  vec2 wc   = uv * 1.3 + vec2(t * 0.07, t * 0.05);
+  // ── Organic warp ──────────────────────────────────────────────────────
+  vec2  wc   = uv * 1.3 + vec2(t * 0.07, t * 0.05);
   float warp = (fbm(wc) - 0.5) * uWarpStrength;
+  vec2  wuv  = uv + warp;
 
-  // Elliptical distance from mouse — spreadX/Y squash the circle independently
-  vec2  delta = uv - uMouse;
-  delta.x    *= aspect * uSpreadX;
-  delta.y    *= uSpreadY;
-  float dist  = length(delta) + warp;
+  // ── Light source position ─────────────────────────────────────────────
+  // The source sits outside/at the edge of the screen, offset from the
+  // mouse in the opposite direction of the beam. This way moving the mouse
+  // pans where the beam illuminates, rather than moving the origin point.
+  vec2 beamDir = vec2(cos(uBeamAngle), sin(uBeamAngle));
+  vec2 source  = uMouse - beamDir * uSourceDist;
 
-  // Exponential falloff — trails off smoothly with no hard edge ever
-  float light = exp(-dist * uFalloff);
+  // ── Vector from source to this pixel (aspect corrected) ──────────────
+  vec2  toPixel  = vec2((wuv.x - source.x) * aspect, wuv.y - source.y);
+  float dist     = length(toPixel);
 
-  // Ambient floor so it never goes fully black away from the mouse
-  float heat = clamp(uAmbient + light, 0.0, 1.0);
+  // Avoid division by zero right at the source
+  vec2  dir      = dist > 0.001 ? toPixel / dist : beamDir;
+
+  // ── Cone: angle between pixel direction and beam direction ────────────
+  // dot(dir, beamDir) = cos(angle between them)
+  // 1.0 = exactly on axis, 0.0 = 90deg off axis, -1.0 = behind source
+  float cosAngle = dot(dir, beamDir);
+
+  // Only pixels in front of the source (cosAngle > 0) get lit.
+  // smoothstep from the cone edge inward gives soft penumbra.
+  float cosConeEdge = cos(uConeAngle);           // half-angle of cone in radians
+  float cone = smoothstep(cosConeEdge, mix(cosConeEdge, 1.0, 0.6), cosAngle);
+
+  // Cut off anything behind the source cleanly
+  cone *= step(0.0, cosAngle);
+
+  // ── Distance falloff ──────────────────────────────────────────────────
+  // exp(-dist * falloff) — light fades as it travels from source
+  float distFade = exp(-dist * uFalloff);
+
+  // ── Combined heat ─────────────────────────────────────────────────────
+  float heat = clamp(uAmbient + cone * distFade, 0.0, 1.0);
 
   vec3 color = colorRamp(heat);
 
-  // ── Grain (identical to blob version) ────────────────────────────────
+  // ── Grain ─────────────────────────────────────────────────────────────
   float grainTime  = uTime * uGrainSpeed;
   float grainFloor = floor(grainTime);
   float grainFract = fract(grainTime);
 
   vec2 grainUV = floor(uv * uResolution / uGrainSize) / (uResolution / uGrainSize);
 
-  vec2 offsetA = vec2(hash(vec2(grainFloor, 0.0)),        hash(vec2(0.0, grainFloor)))        * 100.0;
-  vec2 offsetB = vec2(hash(vec2(grainFloor + 1.0, 0.0)),  hash(vec2(0.0, grainFloor + 1.0)))  * 100.0;
+  vec2 offsetA = vec2(hash(vec2(grainFloor,       0.0)), hash(vec2(0.0, grainFloor      ))) * 100.0;
+  vec2 offsetB = vec2(hash(vec2(grainFloor + 1.0, 0.0)), hash(vec2(0.0, grainFloor + 1.0))) * 100.0;
 
   float grA = hash(grainUV + offsetA) - 0.5;
   float grB = hash(grainUV + offsetB) - 0.5;
@@ -112,17 +134,17 @@ const vertexShader = `
   }
 `
 
-// ─── shaderMaterial ───
 const FlashlightMaterial = shaderMaterial(
   {
     uTime:         0,
     uResolution:   new THREE.Vector2(1, 1),
     uMouse:        new THREE.Vector2(0.5, 0.5),
-    uFalloff:      2.5,
-    uSpreadX:      0.8,
-    uSpreadY:      1.2,
-    uWarpStrength: 0.15,
-    uAmbient:      0.0,
+    uBeamAngle:    Math.PI * 0.75,
+    uConeAngle:    0.7,
+    uFalloff:      1.4,
+    uSourceDist:   0.5,
+    uWarpStrength: 0.18,
+    uAmbient:      0.02,
     uPeakCap:      0.82,
     uGrain:        0.04,
     uGrainSize:    3.0,
@@ -139,36 +161,35 @@ const FlashlightMaterial = shaderMaterial(
 
 extend({ FlashlightMaterial })
 
-// ─── Component ───
 // Props:
 //   mousePosition — { x: [0,1], y: [0,1] } where (0,0) is top-left
 //   windowSize    — { x: innerWidth, y: innerHeight } in CSS pixels
-export default function MovingGradient({ mousePosition, windowSize }) {
-  const mat          = useRef()
-  const smoothMouse  = useRef(new THREE.Vector2(0.5, 0.5))
+export default function FlashlightGradient({ mousePosition, windowSize }) {
+  const mat         = useRef()
+  const smoothMouse = useRef(new THREE.Vector2(0.5, 0.5))
 
-  // ── Light ──
-  const { falloff, spreadX, spreadY, warpStrength, ambient } = useControls('Light', {
-    falloff:      { value: 2.5,  min: 0.2,  max: 10.0, step: 0.1,  label: 'falloff' },
-    spreadX:      { value: 0.8,  min: 0.1,  max: 3.0,  step: 0.05, label: 'spread X' },
-    spreadY:      { value: 1.2,  min: 0.1,  max: 3.0,  step: 0.05, label: 'spread Y' },
-    warpStrength: { value: 0.15, min: 0.0,  max: 0.6,  step: 0.01, label: 'edge warp' },
-    ambient:      { value: 0.0,  min: 0.0,  max: 0.5,  step: 0.01, label: 'ambient floor' },
+  const { beamAngle, coneAngle, falloff, sourceDist, warpStrength, ambient } = useControls('Light', {
+    // Degrees — easier to think about than radians
+    beamAngle:    { value: 135,  min: 0,   max: 360,  step: 1,    label: 'beam angle (deg)' },
+    // Cone half-angle in radians — how wide the beam spreads
+    coneAngle:    { value: 0.7,  min: 0.1, max: 1.5,  step: 0.05, label: 'cone width (rad)' },
+    falloff:      { value: 1.4,  min: 0.1, max: 6.0,  step: 0.1,  label: 'falloff' },
+    // How far behind the mouse the source sits — larger = source further off screen
+    sourceDist:   { value: 0.5,  min: 0.0, max: 2.0,  step: 0.05, label: 'source distance' },
+    warpStrength: { value: 0.18, min: 0.0, max: 0.6,  step: 0.01, label: 'edge warp' },
+    ambient:      { value: 0.02, min: 0.0, max: 0.3,  step: 0.01, label: 'ambient floor' },
   })
 
-  // ── Mouse ──
   const { mouseLag } = useControls('Mouse', {
-    mouseLag: { value: 0.045, min: 0.005, max: 0.2, step: 0.005, label: 'mouse lag' },
+    mouseLag: { value: 0.06, min: 0.005, max: 0.2, step: 0.005, label: 'mouse lag' },
   })
 
-  // ── Grain ──
   const { grain, grainSize, grainSpeed } = useControls('Grain', {
-    grain:      { value: 0.04,  min: 0.0, max: 0.10, step: 0.001 },
-    grainSize:  { value: 3.0,   min: 1.0, max: 10.0, step: 1.0   },
-    grainSpeed: { value: 2.0,   min: 0.5, max: 8.0,  step: 0.5,  label: 'grain speed (fps)' },
+    grain:      { value: 0.04, min: 0.0, max: 0.10, step: 0.001 },
+    grainSize:  { value: 3.0,  min: 1.0, max: 10.0, step: 1.0   },
+    grainSpeed: { value: 2.0,  min: 0.5, max: 8.0,  step: 0.5,  label: 'grain speed (fps)' },
   })
 
-  // ── Colors ──
   const { stop0, stop1, stop2, stop3, stop4, peakCap } = useControls('Colors', {
     stop0:   { value: '#000000', label: 'black' },
     stop1:   { value: '#280200', label: 'dark red-brown' },
@@ -186,15 +207,15 @@ export default function MovingGradient({ mousePosition, windowSize }) {
     m.uResolution.set(windowSize.x * dpr, windowSize.y * dpr)
     m.uTime = clock.elapsedTime
 
-    // Flip Y: browser y=0 is top, shader UV y=0 is bottom
     const mx = mousePosition.x
     const my = 1.0 - mousePosition.y
     smoothMouse.current.lerp({ x: mx, y: my }, mouseLag)
     m.uMouse.copy(smoothMouse.current)
 
+    m.uBeamAngle    = (beamAngle * Math.PI) / 180
+    m.uConeAngle    = coneAngle
     m.uFalloff      = falloff
-    m.uSpreadX      = spreadX
-    m.uSpreadY      = spreadY
+    m.uSourceDist   = sourceDist
     m.uWarpStrength = warpStrength
     m.uAmbient      = ambient
     m.uPeakCap      = peakCap
