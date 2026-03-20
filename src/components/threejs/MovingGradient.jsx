@@ -35,6 +35,14 @@ export default function SmoothGradient() {
     smoothMouse.current[0] += (mx - smoothMouse.current[0]) * mouseLerp
     smoothMouse.current[1] += (my - smoothMouse.current[1]) * mouseLerp
 
+    // Blob wanders using Lissajous-style sine paths.
+    // Amplitude keeps range within [0,1] — full screen.
+    const bx  = 0.5 + Math.sin(t * 0.11) * 0.38 + Math.sin(t * 0.07) * 0.12
+    const by  = 0.5 + Math.cos(t * 0.09) * 0.38 + Math.cos(t * 0.05) * 0.12
+    // Source B orbits Source A — keeps the red fringe attached to the warm core
+    const bx2 = bx - 0.18 + Math.sin(t * 0.13) * 0.04
+    const by2 = by - 0.12 + Math.cos(t * 0.11) * 0.06
+
     u.uTime.value           = t
     u.uResolution.value     = [size.width, size.height]
     u.uMouse.value          = [...smoothMouse.current]
@@ -44,6 +52,8 @@ export default function SmoothGradient() {
     u.uSpread.value         = spread
     u.uDeformStrength.value = deformStrength
     u.uDeformRadius.value   = deformRadius
+    u.uSrcA.value           = [bx,  by]
+    u.uSrcB.value           = [bx2, by2]
   })
 
   return (
@@ -61,6 +71,8 @@ export default function SmoothGradient() {
           uSpread:         { value: spread },
           uDeformStrength: { value: deformStrength },
           uDeformRadius:   { value: deformRadius },
+          uSrcA:           { value: [0.2, 0.8] },
+          uSrcB:           { value: [0.0, 0.5] },
         }}
         vertexShader={vertexShader}
         fragmentShader={fragmentShader}
@@ -105,6 +117,8 @@ uniform float uGrain;
 uniform float uSpread;
 uniform float uDeformStrength;
 uniform float uDeformRadius;
+uniform vec2  uSrcA;
+uniform vec2  uSrcB;
 
 float hash(vec2 p) {
   return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
@@ -161,20 +175,9 @@ void main() {
   float warpY = (fbm(warpCoord + vec2(5.2, 1.3)) - 0.5) * 0.10;
   vec2  swuv  = wuv + vec2(warpX, warpY);
 
-  // ── Two light sources, both off-screen / at the edge ───────────────
-  //
-  // Source A: upper-left corner — the warm peach/tan glow
-  //   Drifts very slowly so the hotspot breathes without relocating.
-  vec2 srcA = vec2(
-    -0.05 + sin(t * 0.13) * 0.05,
-     1.08 + cos(t * 0.09) * 0.04
-  );
-
-  // Source B: left edge, mid-height — the vivid red-orange fringe
-  vec2 srcB = vec2(
-    -0.10 + sin(t * 0.17) * 0.04,
-     0.52 + cos(t * 0.11) * 0.09
-  );
+  // ── Two light sources driven from JS (bouncing paths) ──────────────
+  vec2 srcA = uSrcA;
+  vec2 srcB = uSrcB;
 
   // Aspect-correct the source distances
   vec2 dA = vec2((swuv.x - srcA.x) * aspect, swuv.y - srcA.y);
