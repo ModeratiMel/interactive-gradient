@@ -1,6 +1,6 @@
 import * as THREE from 'three'
 import { shaderMaterial } from '@react-three/drei'
-import { extend, useFrame } from '@react-three/fiber'
+import { extend, useFrame, useThree } from '@react-three/fiber'
 import { useRef } from 'react'
 import { useControls } from 'leva'
 
@@ -122,7 +122,7 @@ void main() {
 
   // Blob size normalised to a 900px reference so they feel the same
   // physical size on any screen or pixel density.
-  float minDim = min(uResolution.x, uResolution.y);
+ float minDim = min(uResolution.x, uResolution.y) / uDPR;
   float sp     = uSpread * uSpread * 0.048 * (900.0 / minDim);
 
   // Warm metaball field
@@ -173,12 +173,10 @@ const vertexShader = `
 `
 
 // ─── Component ───
-// Props:
-//   mousePosition — { x: [0,1], y: [0,1] } where (0,0) is top-left
-//   windowSize    — { x: innerWidth, y: innerHeight } in CSS pixels
-export default function MovingGradient({ mousePosition, windowSize }) {
+export default function MovingGradient({ mousePosition }) {
   const mat = useRef()
   const mouseBlobPos = useRef(new THREE.Vector2(0.5, 0.5))
+  const { size } = useThree()
 
   const { speed, randomness, numWarm, numCold } = useControls('Motion', {
     speed: { value: 0.2, min: 0.01, max: 5.0, step: 0.01 },
@@ -189,9 +187,9 @@ export default function MovingGradient({ mousePosition, windowSize }) {
 
   const { grain, grainSize, grainSpeed, spread, mouseBlend, mouseLag, coldStrength } = useControls('Blobs', {
     grain: { value: 0.04, min: 0.0, max: 0.10, step: 0.001 },
-    grainSize: { value: 20.0, min: 1.0, max: 20.0, step: 1.0 },
+    grainSize: { value: 3.0, min: 1.0, max: 10.0, step: 1.0 },
     grainSpeed: { value: 2.0, min: 1.0, max: 15.0, step: 1.0, label: 'grain speed' },
-    spread: { value: 1.6, min: 0.5, max: 5.0, step: 0.05 },
+    spread: { value: 1.3, min: 0.5, max: 5.0, step: 0.05 },
     mouseBlend: { value: 0.70, min: 0.0, max: 1.0, step: 0.01, label: 'mouse blob strength' },
     mouseLag: { value: 0.045, min: 0.005, max: 0.2, step: 0.005, label: 'mouse lag' },
     coldStrength: { value: 0.65, min: 0.0, max: 1.0, step: 0.01, label: 'cold blob strength' },
@@ -249,7 +247,8 @@ export default function MovingGradient({ mousePosition, windowSize }) {
     // Physical pixel resolution — multiply CSS pixels by DPR so the
     // blob size reference in the shader matches actual rendered pixels.
     const dpr = window.devicePixelRatio || 1
-    m.uResolution.set(windowSize.x * dpr, windowSize.y * dpr)
+    
+    m.uResolution.set(size.width * dpr, size.height * dpr)
     m.uTime = clock.elapsedTime
 
     // mousePosition arrives as { x: [0,1], y: [0,1] } with y=0 at top.

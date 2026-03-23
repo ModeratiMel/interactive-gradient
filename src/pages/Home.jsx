@@ -51,7 +51,6 @@ export default function Home()
                 <Perf position="top-left"/>
         <MovingGradient
           mousePosition={mousePosition}
-          windowSize={windowSize}
         />
       </Canvas>
     </div>
