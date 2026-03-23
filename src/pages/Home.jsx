@@ -12,9 +12,9 @@ export default function Home()
 
   // Window size in CSS pixels
   const [windowSize, setWindowSize] = useState({
-    x: window.innerWidth,
-    y: window.innerHeight,
-  })
+  x: typeof window !== 'undefined' ? window.innerWidth : 1,
+  y: typeof window !== 'undefined' ? window.innerHeight : 1,
+})
 
   useEffect(() => {
     const onMouseMove = (e) => {

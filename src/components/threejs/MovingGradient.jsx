@@ -48,6 +48,7 @@ uniform float uPeakCap;
 uniform float uGrain;
 uniform float uGrainSize;
 uniform float uGrainSpeed;
+uniform float uDPR;
 
 uniform vec3  uC0col;
 uniform vec3  uC1col;
@@ -148,7 +149,7 @@ void main() {
   float grainFloor = floor(grainTime);
   float grainFract = fract(grainTime);
 
-  vec2 grainUV = floor(uv * uResolution / uGrainSize) / (uResolution / uGrainSize);
+  vec2 grainUV = floor(uv * uResolution / (uGrainSize * uDPR)) / (uResolution / (uGrainSize * uDPR));
 
   // hash the frame index itself first — converts linear stepping into
   // a pseudo-random scatter so no two consecutive frames hit nearby hash space
@@ -188,7 +189,7 @@ export default function MovingGradient({ mousePosition, windowSize }) {
 
   const { grain, grainSize, grainSpeed, spread, mouseBlend, mouseLag, coldStrength } = useControls('Blobs', {
     grain: { value: 0.04, min: 0.0, max: 0.10, step: 0.001 },
-    grainSize: { value: 3.0, min: 1.0, max: 10.0, step: 1.0 },
+    grainSize: { value: 20.0, min: 1.0, max: 20.0, step: 1.0 },
     grainSpeed: { value: 2.0, min: 1.0, max: 15.0, step: 1.0, label: 'grain speed' },
     spread: { value: 1.6, min: 0.5, max: 5.0, step: 0.05 },
     mouseBlend: { value: 0.70, min: 0.0, max: 1.0, step: 0.01, label: 'mouse blob strength' },
@@ -202,7 +203,7 @@ export default function MovingGradient({ mousePosition, windowSize }) {
     stop2: { value: '#730100', label: 'muddy crimson' },
     stop3: { value: '#cd3310', label: 'red-orange' },
     stop4: { value: '#e8a06a', label: 'peak (warm core)' },
-    peakCap: { value: 0.82, min: 0.3, max: 1.0, step: 0.01, label: 'peak brightness cap' },
+    peakCap: { value: 0.82, min: 0.3, max: 3.0, step: 0.01, label: 'peak brightness cap' },
   })
 
   // ─── shaderMaterial ─── 
@@ -214,6 +215,7 @@ export default function MovingGradient({ mousePosition, windowSize }) {
       uGrain:        grain,
       uGrainSize: grainSize,
       uGrainSpeed: grainSpeed,
+      uDPR: 1.0,
       uSpread:       spread,
       uMouseBlend:   mouseBlend,
       uColdStrength: coldStrength,
@@ -260,6 +262,7 @@ export default function MovingGradient({ mousePosition, windowSize }) {
     m.uGrain = grain
     m.uGrainSize = grainSize
     m.uGrainSpeed = grainSpeed
+    m.uDPR = window.devicePixelRatio || 1
 
     m.uSpread = spread
     m.uMouseBlend = mouseBlend
