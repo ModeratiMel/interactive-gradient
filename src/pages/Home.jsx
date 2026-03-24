@@ -38,7 +38,7 @@ export default function Home()
 
     return (<>
 
-    <div className="absolute top-0 left-0 w-screen h-screen z-0">
+    <div className="absolute top-0 left-0 w-screen h-screen z-0 opacity-70">
             <Leva />
             <Canvas frameloop="always">
                 <Perf position="top-left"/>
