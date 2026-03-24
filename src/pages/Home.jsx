@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Canvas } from '@react-three/fiber'
-import MovingGradient from "../components/threejs/MovingGradient";
+import Terrain from "../components/threejs/Terrain";
 import { Leva } from "leva";
 import { Perf } from "r3f-perf";
 
@@ -37,21 +37,15 @@ export default function Home()
   }, [])
 
     return (<>
-      {/* <div className="absolute top-0 left-0 w-screen h-screen z-10">
-            <Page>
-                <Section className="flex-col mb-5 mt-20 md:mt-10 ">
-                    <h1 className="text-6xl sm:text-8xl">Hello World</h1>
-                    <h2 className="text-3xl max-w-md m-2">Lorem ipsum dolor sit amet, consectetur adipiscing elit.</h2>
-                </Section>
-            </Page>
-        </div> */}
+
     <div className="absolute top-0 left-0 w-screen h-screen z-0">
             <Leva />
             <Canvas frameloop="always">
                 <Perf position="top-left"/>
-        <MovingGradient
+
+          <Terrain
           mousePosition={mousePosition}
-        />
+          />
       </Canvas>
     </div>
   </>)
