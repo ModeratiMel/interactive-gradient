@@ -198,10 +198,10 @@ vec2 dirVec = vec2(cos(dir), sin(dir));
 vec2 flow = vec2(
   fbm(uv * 3.0 + dirVec * t * 0.25),
   fbm(uv * 3.0 - dirVec.yx * t * 0.22)
-) - 0.5;
+) - 0.52;
 
 //more flow movement
-float driftAngle = sin(t * 0.12) * 3.1415;
+float driftAngle = t * 0.12; // continuous rotation, no bias
 vec2 drift = vec2(cos(driftAngle), sin(driftAngle)) * 0.05;
 
 
@@ -263,12 +263,12 @@ export default function MovingGradient({ mousePosition }) {
 
   // ── Leva ──────────────────────────────────────────────────────────────────
   const { driftSpeed, driftAmt, advectStrength, penSize, viscosity, forceScale } = useControls('Motion', {
-    driftSpeed:     { value: 1.5,  min: 0.05, max: 2.0,  step: 0.05,  label: 'drift speed'   },
-    driftAmt:       { value: 0.08, min: 0.0,  max: 0.12, step: 0.005, label: 'warp amount'   },
-    advectStrength: { value: 0.25,  min: 0.0,  max: 0.50, step: 0.01,  label: 'trail depth'   },
-    penSize:        { value: 0.1,  min: 0.03, max: 0.40, step: 0.01,  label: 'cursor radius' },
+    driftSpeed:     { value: 0.4,  min: 0.05, max: 2.0,  step: 0.05,  label: 'drift speed'   },
+    driftAmt:       { value: 0.04, min: 0.0,  max: 0.12, step: 0.005, label: 'warp amount'   },
+    advectStrength: { value: 0.15,  min: 0.0,  max: 1.0, step: 0.01,  label: 'trail depth'   },
+    penSize:        { value: 0.07,  min: 0.03, max: 0.40, step: 0.01,  label: 'cursor radius' },
     viscosity:      { value: 0.9, min: 0.90, max: 0.999,step: 0.001, label: 'viscosity'     },
-    forceScale:     { value: 3.0,   min: 0.1,  max: 6.0,  step: 0.1,   label: 'force'         },
+    forceScale:     { value: 2.0,   min: 0.1,  max: 6.0,  step: 0.1,   label: 'force'         },
   })
 
   const { grain, grainSize, grainSpeed } = useControls('Grain', {
