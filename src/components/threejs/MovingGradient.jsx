@@ -178,7 +178,6 @@ vec3 colorRamp(float h) {
 }
 
 void main() {
-  // y=0 at bottom in GL
   vec2  uv = gl_FragCoord.xy / uResolution;
   float t  = uTime * uDriftSpeed;
 
@@ -190,10 +189,18 @@ void main() {
   vec2 tuv = vec2(uv.x, 1.0 - uv.y);
   vec2 vel = (texture2D(uVelocityTex, tuv).rg - 0.5) * 2.0;
 
-  // Advect the lookup UV. Clamp — gradient is black at edges, invisible.
+  // BOOSTED cursor trails — more visible in dark areas
+  // Added a nonlinear boost: velocity gets amplified more in dark regions
   vec2 lookupUV = clamp(uv + warp - vel * uAdvectStrength, 0.001, 0.999);
-
+  
   float heat  = clamp(baseHeat(lookupUV, t), 0.0, 1.0);
+  
+  // CURSOR VISIBILITY BOOST: Add velocity magnitude as heat in dark areas
+  // This makes the cursor trails glow even when there's no underlying gradient
+  float velMag = length(vel) * 0.8;  // Velocity magnitude
+  float darkBoost = (1.0 - heat) * velMag * 0.35;  // Boost in dark areas only
+  heat = clamp(heat + darkBoost, 0.0, 1.0);
+  
   vec3  color = colorRamp(heat);
 
   // Temporally-dithered film grain
