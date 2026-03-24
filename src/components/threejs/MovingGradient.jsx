@@ -134,21 +134,24 @@ float baseHeat(vec2 uv, float t) {
   // A) Primary off-canvas source — pushed MUCH further off-canvas
   //    Now at (-0.35, -0.25) with steeper falloff (1.2 instead of 0.55)
   //    This creates the concentrated upper-left warmth while letting
-  //    the lower-right fall to deep black naturally
-  vec2  sA  = vec2(-0.35 + ox, -0.25 + oy);
+  //    the upper-right fall to deep black naturally
+  vec2 sA = vec2(-0.25 + ox, 1.75 + oy);
   float dA  = length(uv - sA);
-  float hA  = exp(-dA * dA * 1.2) * 1.1;  // Steeper falloff, slightly boosted peak
+
+  float ripple = sin((uv.x + uv.y + t * 0.2) * 3.0) * 0.05;
+float breathe = 1.25 + sin(t * 0.15) * 0.15 + ripple;
+  float hA = exp(-dA * dA * (0.45 / breathe)) * 0.85;
 
   // B) Left-edge arc — the vivid red crescent
   //    Moved further left to (-0.18, 0.48) and made slightly more concentrated
   vec2  sB  = vec2(-0.18 + ox * 0.4, 0.48 + oy * 0.8);
   float dB  = length(uv - sB);
-  float hB  = exp(-dB * dB * 2.4) * 0.55;  // Tighter, slightly dimmed
+  float hB  = exp(-dB * dB * (2.4/ breathe)) * 0.55;  // Tighter, slightly dimmed
 
   // C) Dark-crimson midfield — reduced strength to let more black through
   vec2  sC  = vec2(0.65 + ox * 0.2, 0.45 + oy * 0.2);
   float dC  = length(uv - sC);
-  float hC  = exp(-dC * dC * 2.8) * 0.15;  // Much weaker, tighter
+  float hC  = exp(-dC * dC * (2.8/breathe)) * 0.15;  // Much weaker, tighter
 
   return hA + hB + hC;
 }
@@ -189,17 +192,44 @@ void main() {
   vec2 tuv = vec2(uv.x, 1.0 - uv.y);
   vec2 vel = (texture2D(uVelocityTex, tuv).rg - 0.5) * 2.0;
 
-  // BOOSTED cursor trails — more visible in dark areas
-  // Added a nonlinear boost: velocity gets amplified more in dark regions
-  vec2 lookupUV = clamp(uv + warp - vel * uAdvectStrength, 0.001, 0.999);
+float dir = fbm(vec2(t * 0.05, t * 0.04)) * 6.28318; // rotating field direction
+vec2 dirVec = vec2(cos(dir), sin(dir));
+
+vec2 flow = vec2(
+  fbm(uv * 3.0 + dirVec * t * 0.25),
+  fbm(uv * 3.0 - dirVec.yx * t * 0.22)
+) - 0.5;
+
+//more flow movement
+float driftAngle = sin(t * 0.12) * 3.1415;
+vec2 drift = vec2(cos(driftAngle), sin(driftAngle)) * 0.05;
+
+
+vec2 lookupUV = clamp(
+  uv
+  + drift
+  + warp
+  + flow * 0.08
+  - vel * uAdvectStrength,
+  0.001, 0.999
+);
+
+lookupUV += vec2(
+  sin(uv.y * 8.0 + t * 1.2),
+  cos(uv.x * 6.0 - t * 1.1)
+) * 0.008;
   
   float heat  = clamp(baseHeat(lookupUV, t), 0.0, 1.0);
-  
-  // CURSOR VISIBILITY BOOST: Add velocity magnitude as heat in dark areas
-  // This makes the cursor trails glow even when there's no underlying gradient
   float velMag = length(vel) * 0.8;  // Velocity magnitude
   float darkBoost = (1.0 - heat) * velMag * 0.35;  // Boost in dark areas only
   heat = clamp(heat + darkBoost, 0.0, 1.0);
+  
+  float lightCut = smoothstep(0.65, 1.0, heat) * velMag * 0.45;
+heat -= lightCut;
+
+  float pulse = fbm(uv * 2.5 + t * 0.3);
+heat = heat / (1.0 + heat * 0.1);
+heat *= mix(0.9, 1.2, pulse);
   
   vec3  color = colorRamp(heat);
 
