@@ -89,6 +89,10 @@ uniform float     uTime;
 uniform vec2      uResolution;
 uniform float     uDriftSpeed;
 uniform float     uDriftAmt;
+uniform float uFlowStrength;
+uniform float uFlowScale;
+uniform float uFlowSpeed;
+uniform float uFlowRandom;
 uniform float     uAdvectStrength;
 uniform float     uGrain;
 uniform float     uGrainSize;
@@ -117,8 +121,32 @@ float noise(vec2 p) {
 }
 float fbm(vec2 p) {
   float v=0.0,a=0.5;
-  for(int i=0;i<4;i++){v+=noise(p)*a;p=p*2.07+vec2(1.3,0.9);a*=0.5;}
+  for(int i=0;i<4;i++){
+    v+=noise(p)*a;
+    mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
+p = rot * p * 2.0;
+    a*=0.5;
+  }
   return v;
+}
+
+vec2 curlNoise(vec2 p, float t) {
+  float e = 0.001;
+
+  vec2 tOffset = vec2(
+  sin(t * 0.2),
+  cos(t * 0.17)
+) * 0.5;
+
+  float n1 = fbm(p + vec2(0.0, e) + tOffset);
+  float n2 = fbm(p - vec2(0.0, e) + tOffset);
+  float a = (n1 - n2) / (2.0 * e);
+
+  float n3 = fbm(p + vec2(e, 0.0) + tOffset);
+  float n4 = fbm(p - vec2(e, 0.0) + tOffset);
+  float b = (n3 - n4) / (2.0 * e);
+
+  return vec2(a, -b);
 }
 
 // ─── Heat field ───────────────────────────────────────────────────────────────
@@ -192,32 +220,39 @@ void main() {
   vec2 tuv = vec2(uv.x, 1.0 - uv.y);
   vec2 vel = (texture2D(uVelocityTex, tuv).rg - 0.5) * 2.0;
 
-float dir = fbm(vec2(t * 0.05, t * 0.04)) * 6.28318; // rotating field direction
-vec2 dirVec = vec2(cos(dir), sin(dir));
+vec2 flow = curlNoise(uv * uFlowScale, t * uFlowSpeed);
 
-vec2 flow = vec2(
-  fbm(uv * 3.0 + dirVec * t * 0.25),
-  fbm(uv * 3.0 - dirVec.yx * t * 0.22)
-) - 0.5;
+// add gentle variation without bias
+flow += curlNoise(uv * uFlowScale * 2.0, -t * uFlowSpeed * 0.6) * 0.5;
+flow *= mix(0.8, 1.2, uFlowRandom);
 
-//more flow movement
-float driftAngle = sin(t * 0.12) * 3.1415;
-vec2 drift = vec2(cos(driftAngle), sin(driftAngle)) * 0.05;
+vec2 macroFlow = curlNoise(uv * 0.5, t * 0.03) * 0.1;
 
 
 vec2 lookupUV = clamp(
   uv
-  + drift
+  + macroFlow
   + warp
-  + flow * 0.08
+  + flow * uFlowStrength
   - vel * uAdvectStrength,
   0.001, 0.999
 );
 
-lookupUV += vec2(
+//flow offsets for randomness
+vec2 offsetA = vec2(
   sin(uv.y * 8.0 + t * 1.2),
-  cos(uv.x * 6.0 - t * 1.1)
-) * 0.008;
+  cos(uv.x * 8.0 + t * 1.2)
+);
+
+vec2 offsetB = vec2(
+  cos(uv.y * 6.0 - t * 1.1),
+  sin(uv.x * 6.0 - t * 1.1)
+);
+
+// Blend = keeps your randomness but cancels directional bias
+vec2 offset = (offsetA + offsetB) * 0.5;
+
+lookupUV += offset * 0.008;
   
   float heat  = clamp(baseHeat(lookupUV, t), 0.0, 1.0);
   float velMag = length(vel) * 0.8;  // Velocity magnitude
@@ -271,6 +306,13 @@ export default function MovingGradient({ mousePosition }) {
     forceScale:     { value: 3.0,   min: 0.1,  max: 6.0,  step: 0.1,   label: 'force'         },
   })
 
+  const { flowStrength, flowScale, flowSpeed, flowRandom } = useControls('Flow', {
+    flowStrength: { value: 0.08, min: 0.0, max: 0.25, step: 0.005 },
+    flowScale:    { value: 0.5,  min: 0.1, max: 5.0,  step: 0.1 },
+    flowSpeed:    { value: 0.05, min: 0.01, max: 0.5, step: 0.01 },
+    flowRandom:   { value: 0.9,  min: 0.0, max: 1.0,  step: 0.1 },
+  })
+
   const { grain, grainSize, grainSpeed } = useControls('Grain', {
     grain:      { value: 0.040, min: 0.0,  max: 0.10, step: 0.002               },
     grainSize:  { value: 3.0,   min: 1.0,  max: 10.0, step: 1.0                 },
@@ -312,7 +354,11 @@ export default function MovingGradient({ mousePosition }) {
       uAdvectStrength: advectStrength,
       uGrain:          grain,
       uGrainSize:      grainSize,
-      uGrainSpeed:     grainSpeed,
+      uGrainSpeed: grainSpeed,
+      uFlowStrength: flowStrength,
+      uFlowScale: flowScale,
+      uFlowSpeed: flowSpeed,
+      uFlowRandom: flowRandom,
       uDPR:            1.0,
       uVelocityTex:    null,
       uCol0: new THREE.Color(col0),
@@ -343,7 +389,11 @@ export default function MovingGradient({ mousePosition }) {
     m.uAdvectStrength = advectStrength
     m.uGrain          = grain
     m.uGrainSize      = grainSize
-    m.uGrainSpeed     = grainSpeed
+    m.uGrainSpeed = grainSpeed
+    m.uFlowStrength = flowStrength
+    m.uFlowScale = flowScale
+    m.uFlowSpeed = flowSpeed
+    m.uFlowRandom = flowRandom
     m.uDPR            = dpr
     m.uCol0.set(col0); m.uCol1.set(col1); m.uCol2.set(col2); m.uCol3.set(col3)
     m.uCol4.set(col4); m.uCol5.set(col5); m.uCol6.set(col6); m.uCol7.set(col7)
