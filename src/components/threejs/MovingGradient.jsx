@@ -4,30 +4,24 @@ import { extend, useFrame, useThree } from '@react-three/fiber'
 import { useRef, useEffect } from 'react'
 import { useControls } from 'leva'
 
-// ─── Fluid simulation ────────────────────────────────────────────────────────
-// Pure-JS pressure/velocity grid. All inputs/outputs stay in normalised space
-// (cursor deltas as fractions of canvas width/height) so packing into the
-// velocity texture is stable regardless of canvas pixel size.
+// ─── Fluid grid ───────────────────────────────────────────────────────────────
+// Double-buffered pressure/velocity in fully normalised space.
 
 function createFluidGrid(cols, rows) {
-  const n        = cols * rows
-  const xv       = new Float32Array(n)
-  const yv       = new Float32Array(n)
-  const pressure = new Float32Array(n)
+  const n  = cols * rows
+  const xv = new Float32Array(n)
+  const yv = new Float32Array(n)
+  const p0 = new Float32Array(n)
+  const p1 = new Float32Array(n)
 
-  // Toroidal wrap — pressure propagates cleanly across all edges
   function idx(c, r) {
     return ((c % cols + cols) % cols) + ((r % rows + rows) % rows) * cols
   }
 
-  // cx, cy  — normalised cursor position [0,1]
-  // dvx/dvy — cursor delta in normalised units (Δx/width, Δy/height) this frame
-  // pen     — influence radius as fraction of width [0,1]
-  // force   — scalar multiplier
   function addVelocity(cx, cy, dvx, dvy, pen, force) {
     const gc  = cx * cols
     const gr  = cy * rows
-    const gp  = pen * cols   // pen radius in grid cells
+    const gp  = pen * cols
     const gp2 = gp * gp
     for (let c = 0; c < cols; c++) {
       for (let r = 0; r < rows; r++) {
@@ -35,57 +29,45 @@ function createFluidGrid(cols, rows) {
         const dy = r - gr
         const d2 = dx * dx + dy * dy
         if (d2 < gp2) {
-          const falloff = 1.0 - Math.sqrt(d2) / gp   // linear, 1 at centre → 0 at edge
-          xv[idx(c, r)] += dvx * falloff * force
-          yv[idx(c, r)] += dvy * falloff * force
+          const t       = Math.sqrt(d2) / gp
+          const falloff = 0.5 + 0.5 * Math.cos(t * Math.PI) // smooth cosine, no hard edge
+          const i       = idx(c, r)
+          xv[i] += dvx * falloff * force
+          yv[i] += dvy * falloff * force
         }
       }
     }
   }
 
   function step(viscosity) {
-    // Pressure from velocity divergence
+    // Pressure divergence → p1 (reads xv/yv, writes p1 only)
     for (let c = 0; c < cols; c++) {
       for (let r = 0; r < rows; r++) {
-        const i  = idx(c, r)
         const px = (
-            xv[idx(c - 1, r - 1)] * 0.5
-          + xv[idx(c - 1, r    )]
-          + xv[idx(c - 1, r + 1)] * 0.5
-          - xv[idx(c + 1, r - 1)] * 0.5
-          - xv[idx(c + 1, r    )]
-          - xv[idx(c + 1, r + 1)] * 0.5
+            xv[idx(c-1,r-1)]*0.5 + xv[idx(c-1,r)] + xv[idx(c-1,r+1)]*0.5
+          - xv[idx(c+1,r-1)]*0.5 - xv[idx(c+1,r)] - xv[idx(c+1,r+1)]*0.5
         )
         const py = (
-            yv[idx(c - 1, r - 1)] * 0.5
-          + yv[idx(c,     r - 1)]
-          + yv[idx(c + 1, r - 1)] * 0.5
-          - yv[idx(c - 1, r + 1)] * 0.5
-          - yv[idx(c,     r + 1)]
-          - yv[idx(c + 1, r + 1)] * 0.5
+            yv[idx(c-1,r-1)]*0.5 + yv[idx(c,r-1)] + yv[idx(c+1,r-1)]*0.5
+          - yv[idx(c-1,r+1)]*0.5 - yv[idx(c,r+1)] - yv[idx(c+1,r+1)]*0.5
         )
-        pressure[i] = (px + py) * 0.25
+        p1[idx(c,r)] = (px + py) * 0.25
       }
     }
-    // Velocity from pressure gradient
+    // Swap: p1 becomes the read buffer
+    p1.forEach((v, i) => { p0[i] = v })
+
+    // Velocity update reads p0 (complete, stable)
     for (let c = 0; c < cols; c++) {
       for (let r = 0; r < rows; r++) {
-        const i  = idx(c, r)
+        const i = idx(c, r)
         xv[i] += (
-            pressure[idx(c - 1, r - 1)] * 0.5
-          + pressure[idx(c - 1, r    )]
-          + pressure[idx(c - 1, r + 1)] * 0.5
-          - pressure[idx(c + 1, r - 1)] * 0.5
-          - pressure[idx(c + 1, r    )]
-          - pressure[idx(c + 1, r + 1)] * 0.5
+            p0[idx(c-1,r-1)]*0.5 + p0[idx(c-1,r)] + p0[idx(c-1,r+1)]*0.5
+          - p0[idx(c+1,r-1)]*0.5 - p0[idx(c+1,r)] - p0[idx(c+1,r+1)]*0.5
         ) * 0.25
         yv[i] += (
-            pressure[idx(c - 1, r - 1)] * 0.5
-          + pressure[idx(c,     r - 1)]
-          + pressure[idx(c + 1, r - 1)] * 0.5
-          - pressure[idx(c - 1, r + 1)] * 0.5
-          - pressure[idx(c,     r + 1)]
-          - pressure[idx(c + 1, r + 1)] * 0.5
+            p0[idx(c-1,r-1)]*0.5 + p0[idx(c,r-1)] + p0[idx(c+1,r-1)]*0.5
+          - p0[idx(c-1,r+1)]*0.5 - p0[idx(c,r+1)] - p0[idx(c+1,r+1)]*0.5
         ) * 0.25
         xv[i] *= viscosity
         yv[i] *= viscosity
@@ -96,7 +78,7 @@ function createFluidGrid(cols, rows) {
   return { addVelocity, step, xv, yv }
 }
 
-// ─── Shaders ─────────────────────────────────────────────────────────────────
+// ─── Shaders ──────────────────────────────────────────────────────────────────
 
 const vertexShader = `void main() { gl_Position = vec4(position, 1.0); }`
 
@@ -114,101 +96,121 @@ uniform float     uGrainSpeed;
 uniform float     uDPR;
 uniform sampler2D uVelocityTex;
 
-uniform vec3 uCol0;
-uniform vec3 uCol1;
-uniform vec3 uCol2;
-uniform vec3 uCol3;
-uniform vec3 uCol4;
-uniform vec3 uCol5;
-uniform vec3 uCol6;
+// Color stops extracted from the reference image
+uniform vec3 uCol0; // pure black            #000000  — corners / lower-right
+uniform vec3 uCol1; // near black crimson    #1c0200  — dark field
+uniform vec3 uCol2; // deep crimson          #4a0700  — mid field
+uniform vec3 uCol3; // dark red              #7e1000  — inner field
+uniform vec3 uCol4; // red-orange            #c03010  — hot zone
+uniform vec3 uCol5; // vivid left-edge red   #d94020  — left arc
+uniform vec3 uCol6; // warm salmon           #d88060  — upper bloom
+uniform vec3 uCol7; // peach highlight       #e8aa80  — peak / hotspot
 
 float hash(vec2 p) {
-  return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+  return fract(sin(dot(p, vec2(127.1,311.7))) * 43758.5453);
 }
 float noise(vec2 p) {
   vec2 i = floor(p), f = fract(p);
-  f = f * f * (3.0 - 2.0 * f);
-  return mix(
-    mix(hash(i + vec2(0,0)), hash(i + vec2(1,0)), f.x),
-    mix(hash(i + vec2(0,1)), hash(i + vec2(1,1)), f.x), f.y);
+  f = f*f*(3.0-2.0*f);
+  return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),
+             mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);
 }
 float fbm(vec2 p) {
-  float v = 0.0, a = 0.5;
-  for (int i = 0; i < 4; i++) {
-    v += noise(p) * a;
-    p  = p * 2.07 + vec2(1.3, 0.9);
-    a *= 0.5;
-  }
+  float v=0.0,a=0.5;
+  for(int i=0;i<4;i++){v+=noise(p)*a;p=p*2.07+vec2(1.3,0.9);a*=0.5;}
   return v;
 }
 
-// Two-gaussian heat model.
-// A broad outer bloom fills the upper-left arc; a tight core creates the
-// peach hotspot. Both fall off to true black well before x=1 or y=1,
-// so clamping the lookup UV causes zero visible artefacts.
+// ─── Heat field ───────────────────────────────────────────────────────────────
+//
+// Adjusted to push more of the light source off-canvas and create steeper falloff
+// for 30-50% black coverage with concentrated warm tones matching the reference.
+
 float baseHeat(vec2 uv, float t) {
-  float ox = sin(t * 0.13) * 0.05 + cos(t * 0.07) * 0.03;
-  float oy = cos(t * 0.11) * 0.04 + sin(t * 0.09) * 0.03;
-  vec2 src = vec2(0.18 + ox, 0.22 + oy);
+  // Slower, more subtle drift
+  float ox = sin(t * 0.07) * 0.025 + cos(t * 0.05) * 0.018;
+  float oy = cos(t * 0.09) * 0.020 + sin(t * 0.06) * 0.012;
 
-  // Aspect-correct so the bloom is circular in screen space
-  float aspect = uResolution.x / uResolution.y;
-  vec2  d      = vec2((uv.x - src.x) * aspect, uv.y - src.y);
-  float dist   = length(d);
+  // A) Primary off-canvas source — pushed MUCH further off-canvas
+  //    Now at (-0.35, -0.25) with steeper falloff (1.2 instead of 0.55)
+  //    This creates the concentrated upper-left warmth while letting
+  //    the lower-right fall to deep black naturally
+  vec2  sA  = vec2(-0.35 + ox, -0.25 + oy);
+  float dA  = length(uv - sA);
+  float hA  = exp(-dA * dA * 1.2) * 1.1;  // Steeper falloff, slightly boosted peak
 
-  float bloom = exp(-dist * dist * 1.6) * 0.50;  // wide soft arc
-  float core  = exp(-dist * dist * 7.0) * 0.85;  // tight bright centre
-  return bloom + core;
+  // B) Left-edge arc — the vivid red crescent
+  //    Moved further left to (-0.18, 0.48) and made slightly more concentrated
+  vec2  sB  = vec2(-0.18 + ox * 0.4, 0.48 + oy * 0.8);
+  float dB  = length(uv - sB);
+  float hB  = exp(-dB * dB * 2.4) * 0.55;  // Tighter, slightly dimmed
+
+  // C) Dark-crimson midfield — reduced strength to let more black through
+  vec2  sC  = vec2(0.65 + ox * 0.2, 0.45 + oy * 0.2);
+  float dC  = length(uv - sC);
+  float hC  = exp(-dC * dC * 2.8) * 0.15;  // Much weaker, tighter
+
+  return hA + hB + hC;
 }
 
-// Ramp tuned so most of the canvas stays in the very-dark-crimson range,
-// with the bright warm tones only appearing close to the heat source.
-// Stops match the reference image proportions.
+// ─── Colour ramp ──────────────────────────────────────────────────────────────
+// Eight stops. The ramp is calibrated so that the heat values produced by
+// baseHeat() (which peak around 1.3+ at UV origin and fall to ~0 at lower-right)
+// map to the right colours after clamping to [0,1].
+//
+// Pixel-area proportions from the reference:
+//   black / near-black  ~30%  → stops 0-1, heat 0.00-0.18
+//   deep crimson        ~25%  → stops 1-2, heat 0.18-0.38
+//   dark red            ~15%  → stops 2-3, heat 0.38-0.54
+//   red-orange          ~12%  → stops 3-4, heat 0.54-0.66
+//   vivid red (arc)     ~8%   → stops 4-5, heat 0.66-0.76
+//   warm salmon         ~6%   → stops 5-6, heat 0.76-0.86
+//   peach highlight     ~4%   → stops 6-7, heat 0.86-1.00
 vec3 colorRamp(float h) {
   h = clamp(h, 0.0, 1.0);
-  if (h < 0.28) return mix(uCol0, uCol1, h / 0.28);
-  if (h < 0.50) return mix(uCol1, uCol2, (h - 0.28) / 0.22);
-  if (h < 0.64) return mix(uCol2, uCol3, (h - 0.50) / 0.14);
-  if (h < 0.76) return mix(uCol3, uCol4, (h - 0.64) / 0.12);
-  if (h < 0.87) return mix(uCol4, uCol5, (h - 0.76) / 0.11);
-               return mix(uCol5, uCol6, (h - 0.87) / 0.13);
+  if (h < 0.18) return mix(uCol0, uCol1, h / 0.18);
+  if (h < 0.38) return mix(uCol1, uCol2, (h - 0.18) / 0.20);
+  if (h < 0.54) return mix(uCol2, uCol3, (h - 0.38) / 0.16);
+  if (h < 0.66) return mix(uCol3, uCol4, (h - 0.54) / 0.12);
+  if (h < 0.76) return mix(uCol4, uCol5, (h - 0.66) / 0.10);
+  if (h < 0.86) return mix(uCol5, uCol6, (h - 0.76) / 0.10);
+               return mix(uCol6, uCol7, (h - 0.86) / 0.14);
 }
 
 void main() {
-  vec2  uv = gl_FragCoord.xy / uResolution;   // [0,1], y=0 bottom-left
+  // y=0 at bottom in GL
+  vec2  uv = gl_FragCoord.xy / uResolution;
   float t  = uTime * uDriftSpeed;
 
-  // Organic FBM warp keeps the gradient feeling alive
-  vec2 wc   = uv * 1.8 + vec2(t * 0.08, t * 0.06);
+  // Gentle FBM warp for organic softness on gradient edges
+  vec2 wc   = uv * 2.0 + vec2(t * 0.06, t * 0.05);
   vec2 warp = vec2(fbm(wc) - 0.5, fbm(wc + vec2(3.7, 2.1)) - 0.5) * uDriftAmt;
 
-  // Velocity texture was uploaded with y=0 at top (matches mousePosition),
-  // so flip Y when sampling to align with shader UV (y=0 at bottom).
+  // Velocity texture: uploaded top-down, flip Y to match GL UV
   vec2 tuv = vec2(uv.x, 1.0 - uv.y);
   vec2 vel = (texture2D(uVelocityTex, tuv).rg - 0.5) * 2.0;
 
-  // Clamp lookup UV — prevents any seam discontinuity at edges.
-  // The gradient is fully black at the edges so clamping is invisible.
+  // Advect the lookup UV. Clamp — gradient is black at edges, invisible.
   vec2 lookupUV = clamp(uv + warp - vel * uAdvectStrength, 0.001, 0.999);
 
-  float heat  = baseHeat(lookupUV, t);
+  float heat  = clamp(baseHeat(lookupUV, t), 0.0, 1.0);
   vec3  color = colorRamp(heat);
 
-  // Temporally dithered film grain
-  float gTime  = uTime * uGrainSpeed;
-  float gf     = floor(gTime);
-  float gfrac  = fract(gTime);
-  vec2  gUV    = floor(uv * uResolution / (uGrainSize * uDPR))
-               / (uResolution / (uGrainSize * uDPR));
-  vec2  offA   = vec2(hash(vec2(gf,       0.0)), hash(vec2(0.0, gf      ))) * 100.0;
-  vec2  offB   = vec2(hash(vec2(gf + 1.0, 0.0)), hash(vec2(0.0, gf + 1.0))) * 100.0;
-  float gr     = mix(hash(gUV + offA) - 0.5, hash(gUV + offB) - 0.5, gfrac) * uGrain;
+  // Temporally-dithered film grain
+  float gTime = uTime * uGrainSpeed;
+  float gf    = floor(gTime);
+  float gfrac = fract(gTime);
+  vec2  gUV   = floor(uv * uResolution / (uGrainSize * uDPR))
+              / (uResolution / (uGrainSize * uDPR));
+  vec2  offA  = vec2(hash(vec2(gf,      0.0)), hash(vec2(0.0, gf      ))) * 100.0;
+  vec2  offB  = vec2(hash(vec2(gf+1.0,  0.0)), hash(vec2(0.0, gf+1.0  ))) * 100.0;
+  float gr    = mix(hash(gUV+offA)-0.5, hash(gUV+offB)-0.5, gfrac) * uGrain;
 
   gl_FragColor = vec4(clamp(color + gr, 0.0, 1.0), 1.0);
 }
 `
 
-// ─── Component ───────────────────────────────────────────────────────────────
+// ─── Component ────────────────────────────────────────────────────────────────
 export default function MovingGradient({ mousePosition }) {
   const mat      = useRef()
   const { size } = useThree()
@@ -220,44 +222,40 @@ export default function MovingGradient({ mousePosition }) {
   const velBuf     = useRef(new Float32Array(FLUID_COLS * FLUID_ROWS * 4))
   const prevMouse  = useRef({ x: mousePosition.x, y: mousePosition.y })
 
-  if (!fluid.current) {
-    fluid.current = createFluidGrid(FLUID_COLS, FLUID_ROWS)
-  }
+  if (!fluid.current) fluid.current = createFluidGrid(FLUID_COLS, FLUID_ROWS)
 
-  // ── Leva controls ──────────────────────────────────────────────────────────
+  // ── Leva ──────────────────────────────────────────────────────────────────
   const { driftSpeed, driftAmt, advectStrength, penSize, viscosity, forceScale } = useControls('Motion', {
-    driftSpeed:     { value: 0.5,   min: 0.05, max: 2.0,  step: 0.05, label: 'drift speed'   },
-    driftAmt:       { value: 0.05,  min: 0.0,  max: 0.15, step: 0.005,label: 'warp amount'   },
-    advectStrength: { value: 0.10,  min: 0.0,  max: 0.40, step: 0.01, label: 'trail depth'   },
-    penSize:        { value: 0.12,  min: 0.03, max: 0.35, step: 0.01, label: 'cursor radius' },
-    viscosity:      { value: 0.982, min: 0.90, max: 0.999,step: 0.001,label: 'viscosity'     },
-    forceScale:     { value: 18.0,  min: 1.0,  max: 60.0, step: 1.0,  label: 'force'         },
+    driftSpeed:     { value: 1.5,  min: 0.05, max: 2.0,  step: 0.05,  label: 'drift speed'   },
+    driftAmt:       { value: 0.08, min: 0.0,  max: 0.12, step: 0.005, label: 'warp amount'   },
+    advectStrength: { value: 0.25,  min: 0.0,  max: 0.50, step: 0.01,  label: 'trail depth'   },
+    penSize:        { value: 0.1,  min: 0.03, max: 0.40, step: 0.01,  label: 'cursor radius' },
+    viscosity:      { value: 0.9, min: 0.90, max: 0.999,step: 0.001, label: 'viscosity'     },
+    forceScale:     { value: 3.0,   min: 0.1,  max: 6.0,  step: 0.1,   label: 'force'         },
   })
 
   const { grain, grainSize, grainSpeed } = useControls('Grain', {
-    grain:      { value: 0.038, min: 0.0, max: 0.10, step: 0.002              },
-    grainSize:  { value: 3.0,   min: 1.0, max: 10.0, step: 1.0                },
-    grainSpeed: { value: 2.0,   min: 1.0, max: 15.0, step: 1.0, label: 'grain speed' },
+    grain:      { value: 0.040, min: 0.0,  max: 0.10, step: 0.002               },
+    grainSize:  { value: 3.0,   min: 1.0,  max: 10.0, step: 1.0                 },
+    grainSpeed: { value: 2.0,   min: 1.0,  max: 15.0, step: 1.0, label: 'grain speed' },
   })
 
-  const { col0, col1, col2, col3, col4, col5, col6 } = useControls('Colors', {
-    col0: { value: '#000000', label: 'void'         },
-    col1: { value: '#150100', label: 'near-black'   },
-    col2: { value: '#450600', label: 'deep crimson' },
-    col3: { value: '#7a0e00', label: 'dark red'     },
-    col4: { value: '#b82c0e', label: 'red-orange'   },
-    col5: { value: '#cc5535', label: 'warm orange'  },
-    col6: { value: '#e09070', label: 'peach peak'   },
+  const { col0, col1, col2, col3, col4, col5, col6, col7 } = useControls('Colors', {
+    col0: { value: '#000000', label: 'black'          },
+    col1: { value: '#1c0200', label: 'near-black'     },
+    col2: { value: '#4a0700', label: 'deep crimson'   },
+    col3: { value: '#7e1000', label: 'dark red'       },
+    col4: { value: '#c03010', label: 'red-orange'     },
+    col5: { value: '#d94020', label: 'vivid red'      },
+    col6: { value: '#d88060', label: 'warm salmon'    },
+    col7: { value: '#e8aa80', label: 'peach peak'     },
   })
 
-  // ── Velocity DataTexture — created once ────────────────────────────────────
+  // ── DataTexture ────────────────────────────────────────────────────────────
   useEffect(() => {
     const tex = new THREE.DataTexture(
-      velBuf.current,
-      FLUID_COLS,
-      FLUID_ROWS,
-      THREE.RGBAFormat,
-      THREE.FloatType
+      velBuf.current, FLUID_COLS, FLUID_ROWS,
+      THREE.RGBAFormat, THREE.FloatType
     )
     tex.minFilter = THREE.LinearFilter
     tex.magFilter = THREE.LinearFilter
@@ -267,7 +265,7 @@ export default function MovingGradient({ mousePosition }) {
     return () => tex.dispose()
   }, [])
 
-  // ── shaderMaterial ─────────────────────────────────────────────────────────
+  // ── ShaderMaterial ─────────────────────────────────────────────────────────
   const GradientMaterial = shaderMaterial(
     {
       uTime:           0,
@@ -280,13 +278,14 @@ export default function MovingGradient({ mousePosition }) {
       uGrainSpeed:     grainSpeed,
       uDPR:            1.0,
       uVelocityTex:    null,
-      uCol0:           new THREE.Color(col0),
-      uCol1:           new THREE.Color(col1),
-      uCol2:           new THREE.Color(col2),
-      uCol3:           new THREE.Color(col3),
-      uCol4:           new THREE.Color(col4),
-      uCol5:           new THREE.Color(col5),
-      uCol6:           new THREE.Color(col6),
+      uCol0: new THREE.Color(col0),
+      uCol1: new THREE.Color(col1),
+      uCol2: new THREE.Color(col2),
+      uCol3: new THREE.Color(col3),
+      uCol4: new THREE.Color(col4),
+      uCol5: new THREE.Color(col5),
+      uCol6: new THREE.Color(col6),
+      uCol7: new THREE.Color(col7),
     },
     vertexShader,
     fragmentShader
@@ -294,7 +293,7 @@ export default function MovingGradient({ mousePosition }) {
 
   extend({ GradientMaterial })
 
-  // ── Per-frame ──────────────────────────────────────────────────────────────
+  // ── Frame loop ─────────────────────────────────────────────────────────────
   useFrame(({ clock }) => {
     if (!mat.current || !velTex.current) return
     const m   = mat.current
@@ -309,40 +308,25 @@ export default function MovingGradient({ mousePosition }) {
     m.uGrainSize      = grainSize
     m.uGrainSpeed     = grainSpeed
     m.uDPR            = dpr
+    m.uCol0.set(col0); m.uCol1.set(col1); m.uCol2.set(col2); m.uCol3.set(col3)
+    m.uCol4.set(col4); m.uCol5.set(col5); m.uCol6.set(col6); m.uCol7.set(col7)
 
-    m.uCol0.set(col0)
-    m.uCol1.set(col1)
-    m.uCol2.set(col2)
-    m.uCol3.set(col3)
-    m.uCol4.set(col4)
-    m.uCol5.set(col5)
-    m.uCol6.set(col6)
-
-    // ── fluid ──
-    // mousePosition: { x, y } in [0,1], y=0 at top
     const mx  = mousePosition.x
     const my  = mousePosition.y
-    const pmx = prevMouse.current.x
-    const pmy = prevMouse.current.y
-
-    // Deltas in normalised units — independent of canvas pixel dimensions
-    const dvx = mx - pmx
-    const dvy = my - pmy
+    const dvx = mx - prevMouse.current.x
+    const dvy = my - prevMouse.current.y
 
     fluid.current.addVelocity(mx, my, dvx, dvy, penSize, forceScale)
     fluid.current.step(viscosity)
 
-    // Pack into float texture.
-    // Typical delta magnitude is ~0.005–0.02/frame; VMAX=0.04 captures peak moves
-    // without clipping slow drags, giving a clean [-1,1] → [0,1] mapping.
     const { xv, yv } = fluid.current
     const buf         = velBuf.current
-    const VMAX        = 0.04
+    const VMAX        = 0.035
     for (let i = 0; i < FLUID_COLS * FLUID_ROWS; i++) {
-      buf[i * 4 + 0] = Math.max(-1, Math.min(1, xv[i] / VMAX)) * 0.5 + 0.5
-      buf[i * 4 + 1] = Math.max(-1, Math.min(1, yv[i] / VMAX)) * 0.5 + 0.5
-      buf[i * 4 + 2] = 0.0
-      buf[i * 4 + 3] = 1.0
+      buf[i*4+0] = Math.max(-1, Math.min(1, xv[i] / VMAX)) * 0.5 + 0.5
+      buf[i*4+1] = Math.max(-1, Math.min(1, yv[i] / VMAX)) * 0.5 + 0.5
+      buf[i*4+2] = 0.0
+      buf[i*4+3] = 1.0
     }
     velTex.current.needsUpdate = true
     m.uVelocityTex = velTex.current
