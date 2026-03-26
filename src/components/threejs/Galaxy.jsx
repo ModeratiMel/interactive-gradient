@@ -1,143 +1,119 @@
-import { useRef, useMemo } from 'react'
-import { useFrame } from '@react-three/fiber'
-import { useControls } from 'leva'
+// Galaxy.jsx
 import * as THREE from 'three'
-
-const vertexShader = `
-  uniform float uTime;
-  uniform float uSize;
-
-  attribute vec3 aRandomness;
-  attribute float aScale;
-
-  varying vec3 vColor;
-
-  void main() {
-    vec4 modelPosition = modelMatrix * vec4(position, 1.0);
-
-    // Spin
-    float angle = atan(modelPosition.x, modelPosition.z);
-    float distanceToCenter = length(modelPosition.xz);
-    float angleOffset = (1.0 / distanceToCenter) * uTime * 0.2;
-    angle += angleOffset;
-
-    modelPosition.x = cos(angle) * distanceToCenter;
-    modelPosition.z = sin(angle) * distanceToCenter;
-
-    // Randomness
-    modelPosition.xyz += aRandomness;
-
-    vec4 viewPosition = viewMatrix * modelPosition;
-    vec4 projectedPosition = projectionMatrix * viewPosition;
-    gl_Position = projectedPosition;
-
-    gl_PointSize = uSize * aScale;
-    gl_PointSize *= (1.0 / - viewPosition.z);
-
-    vColor = color;
-  }
-`
-
-const fragmentShader = `
-  varying vec3 vColor;
-
-  void main() {
-    float strength = distance(gl_PointCoord, vec2(0.5));
-    strength = 1.0 - strength;
-    strength = pow(strength, 10.0);
-
-    vec3 color = mix(vec3(0.0), vColor, strength);
-    gl_FragColor = vec4(color, 1.0);
-  }
-`
+import { shaderMaterial, OrbitControls } from '@react-three/drei'
+import galaxyVertexShader from './shaders/galaxy/vertex.glsl'
+import galaxyFragmentShader from './shaders/galaxy/fragment.glsl'
+import { extend, useFrame, useThree } from '@react-three/fiber'
+import { useRef, useMemo } from 'react'
+import { useControls } from 'leva'
 
 export default function Galaxy() {
-  const materialRef = useRef()
+    const { gl } = useThree()
+    const materialRef = useRef()
 
-  const {
-    count,
-    radius,
-    branches,
-    randomness,
-    randomnessPower,
-    insideColor,
-    outsideColor,
-  } = useControls('Galaxy', {
-    count:           { value: 200000, min: 100,  max: 1000000, step: 100 },
-    radius:          { value: 5,      min: 0.01, max: 20,      step: 0.01 },
-    branches:        { value: 3,      min: 2,    max: 20,      step: 1 },
-    randomness:      { value: 0.2,    min: 0,    max: 2,       step: 0.001 },
-    randomnessPower: { value: 3,      min: 1,    max: 10,      step: 0.001 },
-    insideColor:     '#ff6030',
-    outsideColor:    '#1b3984',
-  })
+    const {
+        count,
+        speed,
+        size,
+        radius,
+        branches,
+        randomness,
+        randomnessPower,
+        insideColor,
+        outsideColor,
+    } = useControls({
+        count: { value: 200000, min: 100, max: 1000000, step: 100 },
+        speed: { value: 0.1, min: 0.01, max: 5, step: 0.001 },
+        size: { value: 30, min: 10,  max: 100, step: 5},
+        radius:          { value: 5,      min: 0.01, max: 20,      step: 0.01  },
+        branches:        { value: 3,      min: 2,    max: 20,      step: 1     },
+        randomness:      { value: 0.2,    min: 0,    max: 2,       step: 0.001 },
+        randomnessPower: { value: 3,      min: 1,    max: 10,      step: 0.001 },
+        insideColor:     { value: '#ff6030' },
+        outsideColor:    { value: '#1b3984' },
+    })
 
-  const { positions, randomnessAttr, colors, scales } = useMemo(() => {
-    const positions      = new Float32Array(count * 3)
-    const randomnessAttr = new Float32Array(count * 3)
-    const colors         = new Float32Array(count * 3)
-    const scales         = new Float32Array(count)
+    const GalaxyMaterial = shaderMaterial(
+        {
+            uTime: 0,
+            uSpeed: speed,
+            uSize: size,
+        },
+        galaxyVertexShader,
+        galaxyFragmentShader
+    )
+    extend({ GalaxyMaterial })
 
-    const colorInside  = new THREE.Color(insideColor)
-    const colorOutside = new THREE.Color(outsideColor)
+    // Regenerate geometry when params change
+    const { positions, randomnessAttr, colors, scales } = useMemo(() => {
+        const positions     = new Float32Array(count * 3)
+        const randomnessAttr = new Float32Array(count * 3)
+        const colors        = new Float32Array(count * 3)
+        const scales        = new Float32Array(count)
 
-    for (let i = 0; i < count; i++) {
-      const i3 = i * 3
+        const colorInside  = new THREE.Color(insideColor)
+        const colorOutside = new THREE.Color(outsideColor)
 
-      const r           = Math.random() * radius
-      const branchAngle = ((i % branches) / branches) * Math.PI * 2
+        for (let i = 0; i < count; i++) {
+            const i3 = i * 3
 
-      const rx = Math.pow(Math.random(), randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * randomness * r
-      const ry = Math.pow(Math.random(), randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * randomness * r
-      const rz = Math.pow(Math.random(), randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * randomness * r
+            // Position
+            const r           = Math.random() * radius
+            const branchAngle = ((i % branches) / branches) * Math.PI * 2
 
-      positions[i3]     = Math.cos(branchAngle) * r
-      positions[i3 + 1] = 0
-      positions[i3 + 2] = Math.sin(branchAngle) * r
+            const rx = Math.pow(Math.random(), randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * randomness * r
+            const ry = Math.pow(Math.random(), randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * randomness * r
+            const rz = Math.pow(Math.random(), randomnessPower) * (Math.random() < 0.5 ? 1 : -1) * randomness * r
 
-      randomnessAttr[i3]     = rx
-      randomnessAttr[i3 + 1] = ry
-      randomnessAttr[i3 + 2] = rz
+            positions[i3]     = Math.cos(branchAngle) * r
+            positions[i3 + 1] = 0
+            positions[i3 + 2] = Math.sin(branchAngle) * r
 
-      const mixed = colorInside.clone().lerp(colorOutside, r / radius)
-      colors[i3]     = mixed.r
-      colors[i3 + 1] = mixed.g
-      colors[i3 + 2] = mixed.b
+            randomnessAttr[i3]     = rx
+            randomnessAttr[i3 + 1] = ry
+            randomnessAttr[i3 + 2] = rz
 
-      scales[i] = Math.random()
-    }
+            // Color
+            const mixed = colorInside.clone().lerp(colorOutside, r / radius)
+            colors[i3]     = mixed.r
+            colors[i3 + 1] = mixed.g
+            colors[i3 + 2] = mixed.b
 
-    return { positions, randomnessAttr, colors, scales }
-  }, [count, radius, branches, randomness, randomnessPower, insideColor, outsideColor])
+            // Scale
+            scales[i] = Math.random()
+        }
 
-  useFrame(({ clock, gl }) => {
-    if (materialRef.current) {
-      materialRef.current.uniforms.uTime.value  = clock.getElapsedTime()
-    }
-  })
+        return { positions, randomnessAttr, colors, scales }
+    }, [count, radius, branches, randomness, randomnessPower, insideColor, outsideColor])
 
-  const uniforms = useMemo(() => ({
-    uTime: { value: 0 },
-    uSize: { value: 30 * window.devicePixelRatio },
-  }), [])
+    useFrame((state) => {
+        if (materialRef.current) {
+            materialRef.current.uTime  = state.clock.getElapsedTime()
+            materialRef.current.uSpeed = speed   // ← add these
+            materialRef.current.uSize  = size * gl.getPixelRatio()
+        }
+    })
 
-  return (
-    <points>
-      <bufferGeometry>
-        <bufferAttribute attach="attributes-position"    args={[positions,      3]} />
-        <bufferAttribute attach="attributes-aRandomness" args={[randomnessAttr, 3]} />
-        <bufferAttribute attach="attributes-color"       args={[colors,         3]} />
-        <bufferAttribute attach="attributes-aScale"      args={[scales,         1]} />
-      </bufferGeometry>
-      <shaderMaterial
-        ref={materialRef}
-        depthWrite={false}
-        blending={THREE.AdditiveBlending}
-        vertexColors={true}
-        uniforms={uniforms}
-        vertexShader={vertexShader}
-        fragmentShader={fragmentShader}
-      />
-    </points>
-  )
+    return (
+        <>
+            <OrbitControls makeDefault />
+
+            <points>
+                <bufferGeometry>
+                    <bufferAttribute attach="attributes-position"    args={[positions,      3]} />
+                    <bufferAttribute attach="attributes-aRandomness" args={[randomnessAttr, 3]} />
+                    <bufferAttribute attach="attributes-color"       args={[colors,         3]} />
+                    <bufferAttribute attach="attributes-aScale"      args={[scales,         1]} />
+                </bufferGeometry>
+
+                <galaxyMaterial
+                    ref={materialRef}
+                    uSize={30 * gl.getPixelRatio()}
+                    depthWrite={false}
+                    blending={THREE.AdditiveBlending}
+                    vertexColors
+                />
+            </points>
+        </>
+    )
 }
