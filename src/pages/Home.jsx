@@ -3,6 +3,7 @@ import { Canvas } from '@react-three/fiber'
 import Terrain from "../components/threejs/Terrain";
 import { Leva } from "leva";
 import { Perf } from "r3f-perf";
+import Galaxy from "../components/threejs/Galaxy";
 
 export default function Home()
 {
@@ -43,9 +44,7 @@ export default function Home()
             <Canvas frameloop="always">
                 <Perf position="top-left"/>
 
-          <Terrain
-          mousePosition={mousePosition}
-          />
+         <Galaxy/>
       </Canvas>
     </div>
   </>)
