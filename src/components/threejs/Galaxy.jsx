@@ -1,15 +1,17 @@
 // Galaxy.jsx
 import * as THREE from 'three'
-import { shaderMaterial, OrbitControls } from '@react-three/drei'
+import { shaderMaterial, PerspectiveCamera, OrbitControls } from '@react-three/drei'
 import galaxyVertexShader from './shaders/galaxy/vertex.glsl'
 import galaxyFragmentShader from './shaders/galaxy/fragment.glsl'
 import { extend, useFrame, useThree } from '@react-three/fiber'
-import { useRef, useMemo } from 'react'
+import { useRef, useMemo, useEffect } from 'react'
 import { useControls } from 'leva'
 
 export default function Galaxy() {
     const { gl } = useThree()
     const materialRef = useRef()
+    const cameraRef = useRef()
+    const orbitRef = useRef()
 
     const {
         count,
@@ -22,15 +24,15 @@ export default function Galaxy() {
         insideColor,
         outsideColor,
     } = useControls({
-        count: { value: 200000, min: 100, max: 1000000, step: 100 },
-        speed: { value: 0.1, min: 0.01, max: 5, step: 0.001 },
-        size: { value: 30, min: 10,  max: 100, step: 5},
+        count: { value: 5000, min: 100, max: 1000000, step: 100 },
+        speed: { value: 0.01, min: 0.001, max: 5, step: 0.001 },
+        size: { value: 10, min: 5,  max: 100, step: 5},
         radius:          { value: 5,      min: 0.01, max: 20,      step: 0.01  },
         branches:        { value: 3,      min: 2,    max: 20,      step: 1     },
-        randomness:      { value: 0.2,    min: 0,    max: 2,       step: 0.001 },
-        randomnessPower: { value: 3,      min: 1,    max: 10,      step: 0.001 },
-        insideColor:     { value: '#ff6030' },
-        outsideColor:    { value: '#1b3984' },
+        randomness:      { value: 1.20,    min: 0,    max: 2,       step: 0.001 },
+        randomnessPower: { value: 1,      min: 1,    max: 10,      step: 0.001 },
+        insideColor:     { value: '#ffe3cf' },
+        outsideColor:    { value: '#9cfOff' },
     })
 
     const GalaxyMaterial = shaderMaterial(
@@ -92,12 +94,35 @@ export default function Galaxy() {
             materialRef.current.uSpeed = speed   // ← add these
             materialRef.current.uSize  = size * gl.getPixelRatio()
         }
+        // if (orbitRef.current) {
+        //     console.log(orbitRef.current)
+        // }
     })
+
+    useEffect(() => {
+        if (!cameraRef.current) return
+        cameraRef.current.lookAt(
+            0.49699659887622355,
+            -0.12877329814780017,
+            0.7442729864478029
+        )
+    }, [])
 
     return (
         <>
-            <OrbitControls makeDefault />
-
+            {/* <OrbitControls ref={orbitRef} makeDefault/> */}
+            <PerspectiveCamera
+                ref={cameraRef}
+                makeDefault
+                position={[
+                    -0.0739597539304418,
+                    -0.03767466985616738,
+                    0.7890700237959908
+                ]}
+                fov={75}
+                near={0.1}
+                far={1000}
+            />
             <points>
                 <bufferGeometry>
                     <bufferAttribute attach="attributes-position"    args={[positions,      3]} />
