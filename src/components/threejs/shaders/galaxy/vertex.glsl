@@ -1,6 +1,7 @@
 uniform float uTime;
 uniform float uSize;
 uniform float uSpeed;
+uniform float uPointSize;
 
 attribute vec3 aRandomness;
 attribute float aScale;
@@ -34,6 +35,7 @@ void main()
      */
     gl_PointSize = uSize * aScale;
     gl_PointSize *= (1.0 / - viewPosition.z);
+    gl_PointSize = min(gl_PointSize, uPointSize);
 
     /**
      * Color

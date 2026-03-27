@@ -16,6 +16,7 @@ export default function Galaxy() {
     const {
         count,
         speed,
+        pointSize,
         size,
         radius,
         branches,
@@ -26,13 +27,14 @@ export default function Galaxy() {
     } = useControls({
         count: { value: 5000, min: 100, max: 1000000, step: 100 },
         speed: { value: 0.01, min: 0.001, max: 5, step: 0.001 },
+        pointSize: { value: 15, min: 1,  max: 60, step: 0.5},
         size: { value: 10, min: 5,  max: 100, step: 5},
         radius:          { value: 5,      min: 0.01, max: 20,      step: 0.01  },
         branches:        { value: 3,      min: 2,    max: 20,      step: 1     },
         randomness:      { value: 1.20,    min: 0,    max: 2,       step: 0.001 },
         randomnessPower: { value: 1,      min: 1,    max: 10,      step: 0.001 },
         insideColor:     { value: '#ffe3cf' },
-        outsideColor:    { value: '#9cfOff' },
+        outsideColor:    { value: '#9cf0ff' },
     })
 
     const GalaxyMaterial = shaderMaterial(
@@ -40,6 +42,7 @@ export default function Galaxy() {
             uTime: 0,
             uSpeed: speed,
             uSize: size,
+            uPointSize: pointSize
         },
         galaxyVertexShader,
         galaxyFragmentShader
@@ -92,6 +95,7 @@ export default function Galaxy() {
         if (materialRef.current) {
             materialRef.current.uTime  = state.clock.getElapsedTime()
             materialRef.current.uSpeed = speed   // ← add these
+            materialRef.current.uPointSize = pointSize;
             materialRef.current.uSize  = size * gl.getPixelRatio()
         }
         // if (orbitRef.current) {
